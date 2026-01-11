@@ -1,7 +1,10 @@
 import type { Client } from "discord.js";
-import { getPrismaClient } from "../../utils/database.js";
-import { wrapError } from "../../utils/discord.js";
-import { type FormattableMessage, formatMessages } from "../../utils/format.js";
+import { getPrismaClient } from "../../../db/client.js";
+import { wrapError } from "../../../discord/helpers.js";
+import {
+  type FormattableMessage,
+  formatMessages,
+} from "../../../shared/format.js";
 import { defineTool, textResult } from "../registry.js";
 
 // ツールを登録

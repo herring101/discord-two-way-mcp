@@ -4,7 +4,7 @@ import {
   fetchTextBasedChannel,
   validateMessageContent,
   wrapError,
-} from "../../utils/discord.js";
+} from "../../../discord/helpers.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録

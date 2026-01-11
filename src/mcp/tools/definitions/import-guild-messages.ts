@@ -3,7 +3,7 @@ import {
   getImportProgress,
   importAllGuildsAsync,
   importGuildMessages,
-} from "../../utils/import.js";
+} from "../../../discord/import.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録

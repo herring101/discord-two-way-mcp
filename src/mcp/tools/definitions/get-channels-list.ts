@@ -1,5 +1,5 @@
 import type { Client } from "discord.js";
-import { filterTextChannels, wrapError } from "../../utils/discord.js";
+import { filterTextChannels, wrapError } from "../../../discord/helpers.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録

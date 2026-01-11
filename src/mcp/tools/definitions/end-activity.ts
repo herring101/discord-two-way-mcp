@@ -4,7 +4,7 @@
  */
 
 import type { Client } from "discord.js";
-import { getLifecycleController } from "../../discord-client.js";
+import { getLifecycleController } from "../../../discord/client.js";
 import { defineTool, textResult } from "../registry.js";
 
 defineTool(

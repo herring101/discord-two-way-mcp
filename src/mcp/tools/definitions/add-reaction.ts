@@ -1,6 +1,6 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "discord.js";
-import { fetchTextBasedChannel, wrapError } from "../../utils/discord.js";
+import { fetchTextBasedChannel, wrapError } from "../../../discord/helpers.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録

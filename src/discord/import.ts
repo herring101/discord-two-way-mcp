@@ -7,7 +7,7 @@ import {
   type TextChannel,
   type ThreadChannel,
 } from "discord.js";
-import { getPrismaClient, saveGuild, saveMessage } from "./database.js";
+import { getPrismaClient, saveGuild, saveMessage } from "../db/client.js";
 
 const BATCH_SIZE = 100;
 const DELAY_MS = 500;

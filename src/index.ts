@@ -5,8 +5,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { DiscordClient } from "./discord-client.js";
-import { toolRegistry } from "./tools/index.js";
+import { DiscordClient } from "./discord/client.js";
+import { toolRegistry } from "./mcp/tools/index.js";
 
 // Initialize Discord client
 const discordClient = new DiscordClient();

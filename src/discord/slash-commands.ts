@@ -9,10 +9,10 @@ import {
   Routes,
   SlashCommandBuilder,
 } from "discord.js";
-import { getLifecycleController } from "./discord-client.js";
-import { defaultConfig } from "./lifecycle/config.js";
-import { getUnreadSummary } from "./lifecycle/unread.js";
-import { getPrismaClient } from "./utils/database.js";
+import { getPrismaClient } from "../db/client.js";
+import { defaultConfig } from "../lifecycle/config.js";
+import { getUnreadSummary } from "../lifecycle/unread.js";
+import { getLifecycleController } from "./client.js";
 
 // コマンド定義
 const commands = [

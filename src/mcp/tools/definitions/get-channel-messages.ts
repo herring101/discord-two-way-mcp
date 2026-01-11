@@ -1,11 +1,14 @@
 import { type Client, DMChannel } from "discord.js";
-import { saveMessages } from "../../utils/database.js";
+import { saveMessages } from "../../../db/client.js";
 import {
   fetchTextBasedChannel,
   validateAndLimitNumber,
   wrapError,
-} from "../../utils/discord.js";
-import { type FormattableMessage, formatMessages } from "../../utils/format.js";
+} from "../../../discord/helpers.js";
+import {
+  type FormattableMessage,
+  formatMessages,
+} from "../../../shared/format.js";
 import { defineTool, textResult } from "../registry.js";
 
 // ツールを登録

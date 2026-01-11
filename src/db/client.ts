@@ -8,7 +8,7 @@ let prisma: PrismaClient | null = null;
 let currentBotId: string | null = null;
 
 const DATA_DIR = join(import.meta.dirname, "../../data/db");
-const SCHEMA_PATH = join(import.meta.dirname, "../prisma/schema.prisma");
+const SCHEMA_PATH = join(import.meta.dirname, "../db/prisma/schema.prisma");
 
 /**
  * Bot IDからデータベースURLを生成

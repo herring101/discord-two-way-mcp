@@ -3,11 +3,11 @@
  */
 
 import type { Client } from "discord.js";
+import { getPrismaClient } from "../../../db/client.js";
 import {
   formatUnreadSummary,
   getUnreadSummary,
-} from "../../lifecycle/unread.js";
-import { getPrismaClient } from "../../utils/database.js";
+} from "../../../lifecycle/unread.js";
 import { defineTool, textResult } from "../registry.js";
 
 defineTool(

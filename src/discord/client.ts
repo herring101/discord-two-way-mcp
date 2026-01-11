@@ -7,27 +7,27 @@ import {
   type Message,
 } from "discord.js";
 import {
+  disconnectDatabase,
+  getPrismaClient,
+  initDatabase,
+  saveMessage,
+} from "../db/client.js";
+import {
   type ChannelId,
   defaultConfig,
   LifecycleController,
   type MessageId,
   type OutputHandler,
-} from "./lifecycle/index.js";
-import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
-import {
-  disconnectDatabase,
-  getPrismaClient,
-  initDatabase,
-  saveMessage,
-} from "./utils/database.js";
+} from "../lifecycle/index.js";
 import {
   type FormattableMessage,
   formatDateSeparator,
   formatMessage,
   isSameDay,
-} from "./utils/format.js";
-import { importAllGuildsAsync } from "./utils/import.js";
-import { getTmuxSession, sendToTmux } from "./utils/tmux.js";
+} from "../shared/format.js";
+import { getTmuxSession, sendToTmux } from "../shared/tmux.js";
+import { importAllGuildsAsync } from "./import.js";
+import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
 
 // グローバルコントローラーインスタンス（ツールからアクセス用）
 let lifecycleController: LifecycleController | null = null;
