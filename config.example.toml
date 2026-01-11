@@ -1,0 +1,9 @@
+[mcp_servers.discord-two-way]
+command = "bun"
+args = [
+  "run",
+  "/{path-to}/discord-two-way-mcp/src/index.ts"
+]
+
+[mcp_servers.discord-two-way.env]
+DISCORD_BOT_TOKEN = "YOUR_TOKEN_HERE"
