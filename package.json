@@ -1,5 +1,5 @@
 {
-  "name": "discord-log-mcp",
+  "name": "discord-two-way-mcp",
   "module": "src/index.ts",
   "type": "module",
   "private": true,

@@ -14,7 +14,7 @@ const discordClient = new DiscordClient();
 // Create MCP server instance
 const server = new Server(
   {
-    name: "discord-log-mcp",
+    name: "discord-two-way-mcp",
     version: "1.0.0",
   },
   {
@@ -51,7 +51,7 @@ async function main() {
     // Connect to Discord only after MCP is ready
     await discordClient.connect();
 
-    console.error("Discord Log MCP server is running");
+    console.error("Discord Two-Way MCP server is running");
   } catch (error) {
     console.error("Failed to start server:", error);
     await discordClient.disconnect();
