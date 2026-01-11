@@ -1,10 +1,14 @@
 /**
  * 未読管理ロジック
- * チャンネルごとの未読メッセージ数を追跡する
+ * チャンネルごとの未読メッセージをUnreadMessageテーブルで個別管理する
  */
 
-import type { PrismaClient } from "@prisma/client";
-import type { ChannelId, MessageId } from "./types.js";
+import type { PrismaClient } from "../db/generated/prisma/client.js";
+import type {
+  ChannelId,
+  MessageId,
+  UnreadSummaryWithDetails,
+} from "./types.js";
 
 /**
  * 未読サマリー
@@ -13,47 +17,67 @@ export interface UnreadSummary {
   channelId: string;
   guildId: string;
   unreadCount: number;
-  lastReadMessageId: string | null;
 }
 
 /**
- * 未読数をインクリメント
+ * 未読メッセージを追加
  * メッセージ受信時に呼び出す
  */
-export async function incrementUnread(
+export async function addUnreadMessage(
   prisma: PrismaClient,
   channelId: ChannelId,
+  messageId: MessageId,
   guildId: string,
 ): Promise<void> {
-  await prisma.channelReadState.upsert({
-    where: { channelId },
-    update: {
-      unreadCount: { increment: 1 },
+  // UnreadMessageテーブルに追加
+  // 既に存在する場合は何もしない
+  await prisma.unreadMessage.upsert({
+    where: {
+      channelId_messageId: {
+        channelId,
+        messageId,
+      },
     },
+    update: {},
     create: {
       channelId,
+      messageId,
       guildId,
-      unreadCount: 1,
     },
   });
 }
 
 /**
  * チャンネルを既読にする
- * get_channel_messages, focusChannel, mention/reply 時に呼び出す
+ * 指定されたメッセージID以前の未読メッセージをすべて削除する
  */
 export async function markAsRead(
   prisma: PrismaClient,
   channelId: ChannelId,
   lastReadMessageId: MessageId,
 ): Promise<void> {
-  await prisma.channelReadState.updateMany({
-    where: { channelId },
-    data: {
-      unreadCount: 0,
-      lastReadMessageId,
-    },
-  });
+  await prisma.$transaction([
+    // 未読メッセージを削除
+    prisma.unreadMessage.deleteMany({
+      where: { channelId },
+    }),
+    // 既読位置を更新
+    prisma.channelReadState.upsert({
+      where: { channelId },
+      update: {
+        lastReadMessageId,
+        unreadCount: 0, // 互換性のため0にしておく
+      },
+      create: {
+        channelId,
+        guildId:
+          (await prisma.channel.findUnique({ where: { id: channelId } }))
+            ?.guildId ?? "unknown",
+        lastReadMessageId,
+        unreadCount: 0,
+      },
+    }),
+  ]);
 }
 
 /**
@@ -62,36 +86,100 @@ export async function markAsRead(
 export async function getUnreadSummary(
   prisma: PrismaClient,
 ): Promise<UnreadSummary[]> {
-  const states = await prisma.channelReadState.findMany({
-    where: { unreadCount: { gt: 0 } },
-    orderBy: { unreadCount: "desc" },
+  // チャネルごとに未読数をカウント
+  const groups = await prisma.unreadMessage.groupBy({
+    by: ["channelId", "guildId"],
+    _count: {
+      messageId: true,
+    },
+    orderBy: {
+      _count: {
+        messageId: "desc",
+      },
+    },
   });
 
-  return states.map((s) => ({
-    channelId: s.channelId,
-    guildId: s.guildId,
-    unreadCount: s.unreadCount,
-    lastReadMessageId: s.lastReadMessageId,
+  // Prismaの型推論が効きにくい場合があるため any キャストで回避
+  // biome-ignore lint/suspicious/noExplicitAny: Prisma groupBy output type inference
+  return groups.map((g: any) => ({
+    channelId: g.channelId,
+    guildId: g.guildId,
+    unreadCount: g._count.messageId,
   }));
 }
 
 /**
- * 特定チャンネルの未読数を取得
+ * 直近N分間の未読メッセージを取得
  */
-export async function getUnreadCount(
+export async function getRecentUnreadMessages(
   prisma: PrismaClient,
-  channelId: ChannelId,
-): Promise<number> {
-  const state = await prisma.channelReadState.findUnique({
-    where: { channelId },
+  minutes: number,
+): Promise<UnreadSummaryWithDetails[]> {
+  const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+
+  // 直近N分に作成された未読レコードを取得
+  const unreads = await prisma.unreadMessage.findMany({
+    where: {
+      createdAt: {
+        gte: cutoff,
+      },
+    },
+    select: {
+      channelId: true,
+      guildId: true,
+      messageId: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
   });
-  return state?.unreadCount ?? 0;
+
+  if (unreads.length === 0) {
+    return [];
+  }
+
+  // チャンネルごとに整理
+  const channelMap = new Map<string, UnreadSummaryWithDetails>();
+
+  for (const u of unreads) {
+    if (!channelMap.has(u.channelId)) {
+      channelMap.set(u.channelId, {
+        channelId: u.channelId,
+        guildId: u.guildId,
+        unreadCount: 0,
+        messages: [],
+      });
+    }
+
+    const entry = channelMap.get(u.channelId);
+    if (!entry) continue;
+
+    entry.unreadCount++;
+
+    const message = await prisma.message.findUnique({
+      where: { id: u.messageId },
+    });
+
+    if (message) {
+      entry.messages.push({
+        messageId: message.id,
+        authorUsername: message.authorUsername,
+        content: message.content,
+        createdAt: message.createdAt,
+      });
+    }
+  }
+
+  // カウントの多い順にソート
+  return Array.from(channelMap.values()).sort(
+    (a, b) => b.unreadCount - a.unreadCount,
+  );
 }
 
 /**
  * 未読サマリーをプレーンテキストでフォーマット
  */
-// 未読がない場合は null を返す
 export function formatUnreadSummary(summaries: UnreadSummary[]): string | null {
   if (summaries.length === 0) {
     return null;

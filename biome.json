@@ -2,10 +2,8 @@
     "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
     "files": {
         "includes": [
-            "src/**"
-        ],
-        "experimentalScannerIgnores": [
-            "src/db/generated/**"
+            "src/**",
+            "!src/db/generated/**"
         ]
     },
     "linter": {

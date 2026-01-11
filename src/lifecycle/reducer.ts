@@ -130,7 +130,7 @@ export function reduce(state: LifeState, event: LifeEvent): ReduceResult {
           type: "ACTIVITY_DIGEST",
           windowStartMs: event.windowStartMs,
           windowEndMs: event.windowEndMs,
-          counts: event.counts,
+          summary: event.summary,
         });
       }
       return { state, outputs };

@@ -3,7 +3,7 @@
  * 副作用を持つ処理を担当し、内側のreducerに委譲する
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../db/generated/prisma/client.js";
 import {
   defaultConfig,
   isInSleepWindow,
@@ -18,13 +18,15 @@ import type {
   LifeOutput,
   LifeState,
   MessageId,
+  UnreadSummaryWithDetails,
   UserId,
 } from "./types.js";
 import { toChannelId, toUnixMs } from "./types.js";
 import {
+  addUnreadMessage,
   formatUnreadSummary,
+  getRecentUnreadMessages,
   getUnreadSummary,
-  incrementUnread,
   markAsRead,
 } from "./unread.js";
 
@@ -38,7 +40,7 @@ export interface OutputHandler {
   onActivityDigest: (
     windowStartMs: number,
     windowEndMs: number,
-    counts: Record<string, number>,
+    summary: UnreadSummaryWithDetails[],
   ) => void;
   sendToAgent: (message: string) => void;
 }
@@ -57,7 +59,6 @@ export class LifecycleController {
   private sleepPending = false;
   private nextActivityTickAt: number | null = null;
   private activityWindowStartMs: number | null = null;
-  private activityCounts: Map<string, number> = new Map();
 
   // タイマー
   private promotionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,16 +130,9 @@ export class LifecycleController {
     const now = Date.now();
     const chId = toChannelId(channelId);
 
-    // 未読カウントをインクリメント（focus channel以外、またはWATCHINGでない場合）
-    const isFocusChannel =
-      this.state.mode === "AWAKE_WATCHING" &&
-      this.state.focusChannelId === chId;
-
-    if (!isFocusChannel && !isMentionOrReplyToAgent) {
-      await incrementUnread(this.prisma, chId, guildId);
-    }
-
     // reducerにイベントを送信
+    // 注意: 未読判定には状態遷移後の focusChannelId が必要なので、
+    // 先に dispatch してから判定を行う
     const event: LifeEvent = {
       type: "DISCORD_MESSAGE",
       channelId: chId,
@@ -149,6 +143,21 @@ export class LifecycleController {
 
     const prevMode = this.state.mode;
     this.dispatch(event);
+
+    // 未読メッセージを追加（focus channel以外、またはWATCHINGでない場合）
+    // メンション/リプライは即座に既読になるので追加しない
+    const isFocusChannel =
+      this.state.mode === "AWAKE_WATCHING" &&
+      this.state.focusChannelId === chId;
+
+    if (!isFocusChannel && !isMentionOrReplyToAgent) {
+      await addUnreadMessage(
+        this.prisma,
+        chId,
+        messageId as MessageId,
+        guildId,
+      );
+    }
 
     // WATCHING開始時に未読サマリーを送る（確率昇格時と同様）
     if (
@@ -168,12 +177,8 @@ export class LifecycleController {
       await markAsRead(this.prisma, chId, messageId as MessageId);
     }
 
-    // 5分集計のカウント
+    // 5分集計のタイマー開始
     if (this.state.mode === "AWAKE_WATCHING") {
-      this.activityCounts.set(
-        channelId,
-        (this.activityCounts.get(channelId) ?? 0) + 1,
-      );
       this.scheduleActivityTickIfNeeded(now);
     }
 
@@ -265,7 +270,7 @@ export class LifecycleController {
           this.handler.onActivityDigest(
             output.windowStartMs,
             output.windowEndMs,
-            output.counts,
+            output.summary,
           );
           break;
         case "NOOP":
@@ -351,7 +356,6 @@ export class LifecycleController {
 
   private scheduleActivityTickIfNeeded(nowMs: number): void {
     if (this.state.mode !== "AWAKE_WATCHING") {
-      this.activityCounts.clear();
       this.activityWindowStartMs = null;
       this.nextActivityTickAt = null;
       if (this.activityTimer) {
@@ -373,26 +377,29 @@ export class LifecycleController {
     }, this.config.activityTickIntervalMs);
   }
 
-  private handleActivityTick(): void {
+  private async handleActivityTick(): Promise<void> {
     if (this.state.mode !== "AWAKE_WATCHING") {
       return;
     }
 
     const nowMs = Date.now();
-    const counts: Record<string, number> = {};
-    for (const [k, v] of this.activityCounts) {
-      counts[k] = v;
-    }
+    const durationMinutes =
+      (nowMs - (this.activityWindowStartMs ?? nowMs)) / 1000 / 60;
+    // 少なくとも5分間、あるいはウィンドウ開始からの未読を取得
+    // 念の為少し余裕を持たせる（5分 -> 6分とか）
+    const summary = await getRecentUnreadMessages(
+      this.prisma,
+      Math.max(5, Math.ceil(durationMinutes)),
+    );
 
     this.dispatch({
       type: "ACTIVITY_TICK",
       windowStartMs: toUnixMs(this.activityWindowStartMs ?? nowMs),
       windowEndMs: toUnixMs(nowMs),
-      counts,
+      summary,
     });
 
     // 次のウィンドウ
-    this.activityCounts.clear();
     this.activityWindowStartMs = nowMs;
     this.nextActivityTickAt = nowMs + this.config.activityTickIntervalMs;
 

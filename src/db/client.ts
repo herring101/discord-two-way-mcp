@@ -58,25 +58,24 @@ export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
 
   const databaseUrl = `file:${dbFilePath}`;
 
-  // スキーマをプッシュ（テーブル作成）- ローカルの Prisma CLI を使用
-  if (isNewDatabase) {
-    const prismaPath = join(
-      import.meta.dirname,
-      "../../node_modules/.bin/prisma",
+  // スキーマをプッシュ（テーブル作成・更新）- ローカルの Prisma CLI を使用
+  // 常に実行して最新のスキーマを適用する
+  const prismaPath = join(
+    import.meta.dirname,
+    "../../node_modules/.bin/prisma",
+  );
+  try {
+    execSync(
+      `"${prismaPath}" db push --schema="${SCHEMA_PATH}" --url="${databaseUrl}"`,
+      {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
     );
-    try {
-      execSync(
-        `"${prismaPath}" db push --schema="${SCHEMA_PATH}" --url="${databaseUrl}"`,
-        {
-          encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
-      logger.info("Database schema pushed successfully");
-    } catch (error) {
-      logger.error("Failed to push database schema:", error);
-      throw error;
-    }
+    logger.info("Database schema pushed successfully");
+  } catch (error) {
+    logger.error("Failed to push database schema:", error);
+    throw error;
   }
 
   // Prisma 7: libsql アダプターファクトリーを使用（Bun 対応）

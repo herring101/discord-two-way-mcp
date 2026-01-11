@@ -20,7 +20,6 @@ describe("formatUnreadSummary", () => {
         channelId: "123456",
         guildId: "guild-1",
         unreadCount: 5,
-        lastReadMessageId: null,
       },
     ];
     const result = formatUnreadSummary(summaries);
@@ -34,13 +33,11 @@ describe("formatUnreadSummary", () => {
         channelId: "123",
         guildId: "guild-1",
         unreadCount: 10,
-        lastReadMessageId: null,
       },
       {
         channelId: "456",
         guildId: "guild-1",
         unreadCount: 3,
-        lastReadMessageId: "msg-1",
       },
     ];
     const result = formatUnreadSummary(summaries);

@@ -17,6 +17,8 @@ export type {
   LifeState,
   MessageId,
   ReduceResult,
+  UnreadDetail,
+  UnreadSummaryWithDetails,
   UserId,
 } from "./types.js";
 export {
@@ -26,10 +28,10 @@ export {
   toUserId,
 } from "./types.js";
 export {
+  addUnreadMessage,
   formatUnreadSummary,
-  getUnreadCount,
+  getRecentUnreadMessages,
   getUnreadSummary,
-  incrementUnread,
   markAsRead,
   type UnreadSummary,
 } from "./unread.js";

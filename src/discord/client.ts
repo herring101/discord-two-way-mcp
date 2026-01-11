@@ -18,6 +18,7 @@ import {
   LifecycleController,
   type MessageId,
   type OutputHandler,
+  type UnreadSummaryWithDetails,
 } from "../lifecycle/index.js";
 import {
   type FormattableMessage,
@@ -141,34 +142,48 @@ export class DiscordClient {
       onActivityDigest: (
         windowStartMs: number,
         windowEndMs: number,
-        counts: Record<string, number>,
+        summary: UnreadSummaryWithDetails[],
       ) => {
         if (!this.tmuxSession) return;
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
-        const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
 
-        // 各チャンネルの件数をフォーマット
-        const details = Object.entries(counts)
-          .sort(([, a], [, b]) => b - a) // 件数順にソート
-          .map(([channelId, count]) => {
-            const channel = this.client.channels.cache.get(channelId);
-            let name = `ch:${channelId}`;
+        if (summary.length === 0) {
+          return;
+        }
 
-            if (channel) {
-              if ("name" in channel && typeof channel.name === "string") {
-                name = `#${channel.name}`;
-              } else if (channel instanceof DMChannel) {
-                name = channel.recipient
-                  ? `DM(${channel.recipient.username})`
-                  : "DM";
-              }
+        const totalUnread = summary.reduce((acc, s) => acc + s.unreadCount, 0);
+        const header = `[Activity] 過去${duration}分: 新着未読 ${totalUnread}件`;
+        const lines = [header];
+
+        for (const s of summary) {
+          const channel = this.client.channels.cache.get(s.channelId);
+          let channelName = `ch:${s.channelId}`;
+
+          if (channel) {
+            if ("name" in channel && typeof channel.name === "string") {
+              channelName = `#${channel.name}`;
+            } else if (channel instanceof DMChannel) {
+              channelName = channel.recipient
+                ? `DM(${channel.recipient.username})`
+                : "DM";
             }
-            return `${name}: ${count}`;
-          })
-          .join(", ");
+          }
 
-        const summary = `[Activity] 過去${duration}分: ${totalCount}件のメッセージ (${details})`;
-        sendToTmux(this.tmuxSession, summary);
+          lines.push(`  ${channelName} (${s.unreadCount})`);
+          // メッセージは新しい順に入っているので、古い順（時系列）に直して表示すると分かりやすいが、
+          // ここではリスト順（新しい順）のままで、最新3件程度を表示する
+          for (const msg of s.messages.slice(0, 3)) {
+            const content = msg.content.replace(/\n/g, " ");
+            const safeContent =
+              content.length > 50 ? `${content.slice(0, 50)}...` : content;
+            lines.push(`    ${msg.authorUsername}: ${safeContent}`);
+          }
+          if (s.messages.length > 3) {
+            lines.push(`    ...他 ${s.messages.length - 3} 件`);
+          }
+        }
+
+        sendToTmux(this.tmuxSession, lines.join("\n"));
       },
       sendToAgent: (message: string) => {
         if (!this.tmuxSession) return;

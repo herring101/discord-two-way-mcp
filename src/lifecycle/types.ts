@@ -48,6 +48,20 @@ export const initialLifeState: LifeState = {
 // イベント（外側から内側に投げる）
 // ============================================================
 
+export interface UnreadDetail {
+  messageId: string;
+  authorUsername: string;
+  content: string;
+  createdAt: Date;
+}
+
+export interface UnreadSummaryWithDetails {
+  channelId: string;
+  guildId: string;
+  unreadCount: number;
+  messages: UnreadDetail[];
+}
+
 export type LifeEvent =
   | { type: "WAKE" }
   | { type: "SLEEP" }
@@ -68,7 +82,7 @@ export type LifeEvent =
       type: "ACTIVITY_TICK";
       windowStartMs: UnixMs;
       windowEndMs: UnixMs;
-      counts: Record<string, number>;
+      summary: UnreadSummaryWithDetails[];
     };
 
 // ============================================================
@@ -84,7 +98,7 @@ export type LifeOutput =
       type: "ACTIVITY_DIGEST";
       windowStartMs: UnixMs;
       windowEndMs: UnixMs;
-      counts: Record<string, number>;
+      summary: UnreadSummaryWithDetails[];
     };
 
 // ============================================================

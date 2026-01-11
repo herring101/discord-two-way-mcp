@@ -92,8 +92,20 @@ model ChannelReadState {
   channelId         String   @id
   guildId           String
   lastReadMessageId String?
-  unreadCount       Int      @default(0)
+  unreadCount       Int      @default(0) // Deprecated: Use UnreadMessage table instead
   updatedAt         DateTime @updatedAt
 
   @@index([guildId])
+}
+
+model UnreadMessage {
+  id        String   @id @default(uuid())
+  channelId String
+  guildId   String
+  messageId String
+  createdAt DateTime @default(now())
+
+  @@unique([channelId, messageId])
+  @@index([channelId])
+  @@index([createdAt])
 }

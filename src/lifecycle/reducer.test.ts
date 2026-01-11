@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { reduce } from "./reducer.js";
-import type { LifeState } from "./types.js";
+import type { LifeState, UnreadSummaryWithDetails } from "./types.js";
 import { toChannelId, toMessageId, toUnixMs, toUserId } from "./types.js";
 
 // ヘルパー
@@ -277,12 +277,19 @@ describe("SET_FOCUS_CHANNEL", () => {
 describe("ACTIVITY_TICK", () => {
   test("AWAKE_WATCHING → ACTIVITY_DIGEST output", () => {
     const state: LifeState = { mode: "AWAKE_WATCHING", focusChannelId: ch1 };
-    const counts = { [ch1]: 5, [ch2]: 3 };
+    const summary: UnreadSummaryWithDetails[] = [
+      {
+        channelId: ch1,
+        guildId: "g1",
+        unreadCount: 5,
+        messages: [],
+      },
+    ];
     const result = reduce(state, {
       type: "ACTIVITY_TICK",
       windowStartMs: toUnixMs(1000),
       windowEndMs: toUnixMs(2000),
-      counts,
+      summary,
     });
 
     expect(result.outputs).toHaveLength(1);
@@ -290,7 +297,7 @@ describe("ACTIVITY_TICK", () => {
       type: "ACTIVITY_DIGEST",
       windowStartMs: toUnixMs(1000),
       windowEndMs: toUnixMs(2000),
-      counts,
+      summary,
     });
   });
 
@@ -303,7 +310,7 @@ describe("ACTIVITY_TICK", () => {
       type: "ACTIVITY_TICK",
       windowStartMs: toUnixMs(1000),
       windowEndMs: toUnixMs(2000),
-      counts: {},
+      summary: [],
     });
 
     expect(result.outputs).toHaveLength(0);
