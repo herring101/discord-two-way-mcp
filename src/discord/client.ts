@@ -152,38 +152,28 @@ export class DiscordClient {
         }
 
         const totalUnread = summary.reduce((acc, s) => acc + s.unreadCount, 0);
-        const header = `[Activity] 過去${duration}分: 新着未読 ${totalUnread}件`;
-        const lines = [header];
 
-        for (const s of summary) {
-          const channel = this.client.channels.cache.get(s.channelId);
-          let channelName = `ch:${s.channelId}`;
+        // 各チャンネルの件数をフォーマット
+        const details = summary
+          .map((s) => {
+            const channel = this.client.channels.cache.get(s.channelId);
+            let channelName = `ch:${s.channelId}`;
 
-          if (channel) {
-            if ("name" in channel && typeof channel.name === "string") {
-              channelName = `#${channel.name}`;
-            } else if (channel instanceof DMChannel) {
-              channelName = channel.recipient
-                ? `DM(${channel.recipient.username})`
-                : "DM";
+            if (channel) {
+              if ("name" in channel && typeof channel.name === "string") {
+                channelName = `#${channel.name}(ch:${s.channelId})`;
+              } else if (channel instanceof DMChannel) {
+                channelName = channel.recipient
+                  ? `DM(${channel.recipient.username})`
+                  : `DM(${s.channelId})`;
+              }
             }
-          }
+            return `${channelName}: ${s.unreadCount}`;
+          })
+          .join(", ");
 
-          lines.push(`  ${channelName} (${s.unreadCount})`);
-          // メッセージは新しい順に入っているので、古い順（時系列）に直して表示すると分かりやすいが、
-          // ここではリスト順（新しい順）のままで、最新3件程度を表示する
-          for (const msg of s.messages.slice(0, 3)) {
-            const content = msg.content.replace(/\n/g, " ");
-            const safeContent =
-              content.length > 50 ? `${content.slice(0, 50)}...` : content;
-            lines.push(`    ${msg.authorUsername}: ${safeContent}`);
-          }
-          if (s.messages.length > 3) {
-            lines.push(`    ...他 ${s.messages.length - 3} 件`);
-          }
-        }
-
-        sendToTmux(this.tmuxSession, lines.join("\n"));
+        const message = `[Activity] 過去${duration}分: 新着未読 ${totalUnread}件 (${details})`;
+        sendToTmux(this.tmuxSession, message);
       },
       sendToAgent: (message: string) => {
         if (!this.tmuxSession) return;
