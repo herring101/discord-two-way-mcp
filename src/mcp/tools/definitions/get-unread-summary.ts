@@ -23,6 +23,7 @@ defineTool(
   async (_client: Client, _args: Record<string, unknown>) => {
     const prisma = getPrismaClient();
     const summaries = await getUnreadSummary(prisma);
-    return textResult(formatUnreadSummary(summaries));
+    const summary = formatUnreadSummary(summaries);
+    return textResult(summary ?? "未読メッセージはありません。");
   },
 );

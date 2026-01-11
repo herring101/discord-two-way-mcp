@@ -11,7 +11,7 @@ import { formatUnreadSummary, type UnreadSummary } from "./unread.js";
 describe("formatUnreadSummary", () => {
   test("空の場合", () => {
     const result = formatUnreadSummary([]);
-    expect(result).toBe("未読メッセージはありません。");
+    expect(result).toBeNull();
   });
 
   test("1チャンネルの未読", () => {

@@ -91,9 +91,10 @@ export async function getUnreadCount(
 /**
  * 未読サマリーをプレーンテキストでフォーマット
  */
-export function formatUnreadSummary(summaries: UnreadSummary[]): string {
+// 未読がない場合は null を返す
+export function formatUnreadSummary(summaries: UnreadSummary[]): string | null {
   if (summaries.length === 0) {
-    return "未読メッセージはありません。";
+    return null;
   }
 
   const lines = ["--- 未読サマリー ---"];

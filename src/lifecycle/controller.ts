@@ -158,7 +158,9 @@ export class LifecycleController {
     ) {
       const summaries = await getUnreadSummary(this.prisma);
       const summary = formatUnreadSummary(summaries);
-      this.handler.sendToAgent(summary);
+      if (summary) {
+        this.handler.sendToAgent(summary);
+      }
     }
 
     // メンション/リプライまたはfocusChannelなら既読化
@@ -338,9 +340,11 @@ export class LifecycleController {
       focusChannelId,
     });
 
-    // 未読サマリーを送信
+    // 未読サマリーを送信（未読がある場合のみ）
     const summary = formatUnreadSummary(summaries);
-    this.handler.sendToAgent(summary);
+    if (summary) {
+      this.handler.sendToAgent(summary);
+    }
 
     await this.saveState();
   }
