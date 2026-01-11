@@ -25,9 +25,7 @@ export class DiscordClient {
     // tmuxセッションを検出
     this.tmuxSession = getTmuxSession();
     if (!this.tmuxSession) {
-      console.error(
-        "⚠️ Warning: tmux外で実行されています。Discordメッセージ通知を受けるには tclaude コマンドで起動してください。",
-      );
+      console.error("⚠️ Warning: tmuxセッションが検出されませんでした。");
     } else {
       console.error(`tmux session detected: ${this.tmuxSession}`);
     }
@@ -39,13 +37,11 @@ export class DiscordClient {
     this.client.once("clientReady", async () => {
       console.error(`Discord bot logged in as ${this.client.user?.tag}`);
 
-      // Bot IDでデータベースを初期化
       if (this.client.user) {
         try {
           const { isNewDatabase } = await initDatabase(this.client.user.id);
           console.error(`Database initialized for bot ${this.client.user.id}`);
 
-          // 新規DBの場合は全ギルドのメッセージを非同期でインポート
           if (isNewDatabase) {
             console.error(
               "[Import] New database detected, starting initial import...",
@@ -64,32 +60,26 @@ export class DiscordClient {
       console.error("Discord error:", error);
     });
 
-    // メッセージ受信時にDBに保存
     this.client.on("messageCreate", (message: Message) => {
       this.handleMessage(message);
     });
   }
 
   private handleMessage(message: Message): void {
-    // Bot自身のメッセージは無視
     if (message.author.bot) return;
 
-    // DBに保存（非同期）
     saveMessage(message).catch((error) => {
       console.error("Failed to save message to DB:", error);
     });
 
-    // ログ出力
     console.error(
       `[MSG] ${message.author.tag}: ${message.content.slice(0, 50)}${message.content.length > 50 ? "..." : ""}`,
     );
 
-    // tmux通知
     this.notifyTmux(message);
   }
 
   private notifyTmux(message: Message): void {
-    // tmuxセッションがなければスキップ
     if (!this.tmuxSession) return;
 
     const notification = `[Discord] ${message.author.tag}: ${message.content}`;

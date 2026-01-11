@@ -1,0 +1,73 @@
+#!/bin/bash
+# tclaude - Claude Code を tmux セッション内で起動するコマンド
+# Discord MCP からのメッセージ通知を受け取れるようにする
+
+set -euo pipefail
+
+DIR_NAME=$(basename "$(pwd)")
+BASE_SESSION="claude-${DIR_NAME}"
+CURRENT_DIR="$(pwd)"
+
+# 既存セッションから現在のディレクトリと一致するものを探す
+find_matching_session() {
+  local sessions
+  sessions=$(tmux list-sessions -F '#S' 2>/dev/null | grep "^${BASE_SESSION}" || true)
+  
+  for session in $sessions; do
+    local session_dir
+    session_dir=$(tmux display-message -t "$session" -p '#{pane_current_path}' 2>/dev/null || true)
+    
+    if [ "$session_dir" = "$CURRENT_DIR" ]; then
+      echo "$session"
+      return 0
+    fi
+  done
+  
+  return 1
+}
+
+# 次の利用可能なセッション名を取得
+get_next_session_name() {
+  if ! tmux has-session -t "$BASE_SESSION" 2>/dev/null; then
+    echo "$BASE_SESSION"
+    return
+  fi
+  
+  local i=2
+  while tmux has-session -t "${BASE_SESSION}-${i}" 2>/dev/null; do
+    ((i++))
+  done
+  
+  echo "${BASE_SESSION}-${i}"
+}
+
+# メイン処理
+main() {
+  # 既存の一致するセッションを探す
+  local existing_session
+  if existing_session=$(find_matching_session); then
+    echo "既存セッション '$existing_session' にアタッチします..."
+    tmux attach -t "$existing_session"
+    return
+  fi
+  
+  # 新規セッションを作成
+  local new_session
+  new_session=$(get_next_session_name)
+  
+  # 一意な一時ファイルを作成してセッション名を書き込む
+  SESSION_FILE=$(mktemp /tmp/discord-mcp-session.XXXXXX)
+  echo "$new_session" > "$SESSION_FILE"
+  
+  # 終了時に一時ファイルを削除
+  trap "rm -f $SESSION_FILE" EXIT
+  
+  echo "新規セッション '$new_session' を作成します..."
+  echo "セッションファイル: $SESSION_FILE"
+  
+  # 環境変数をセットして起動
+  tmux new-session -s "$new_session" -c "$CURRENT_DIR" \
+    "export TMUX_SESSION_FILE='$SESSION_FILE'; claude $*"
+}
+
+main "$@"

@@ -6,7 +6,6 @@ import "./send-message.js";
 import "./import-guild-messages.js";
 import "./reply-to-message.js";
 import "./get-channels-list.js";
-import "./add-reaction.js";
 import "./search-messages.js";
 
 // レジストリをエクスポート
