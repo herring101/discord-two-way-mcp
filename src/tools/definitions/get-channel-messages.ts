@@ -1,12 +1,12 @@
 import { type Client, DMChannel } from "discord.js";
-import { saveMessages } from "../utils/database.js";
+import { saveMessages } from "../../utils/database.js";
 import {
   fetchTextBasedChannel,
   validateAndLimitNumber,
   wrapError,
-} from "../utils/discord.js";
-import { type FormattableMessage, formatMessages } from "../utils/format.js";
-import { defineTool, textResult } from "./registry.js";
+} from "../../utils/discord.js";
+import { type FormattableMessage, formatMessages } from "../../utils/format.js";
+import { defineTool, textResult } from "../registry.js";
 
 // ツールを登録
 defineTool(

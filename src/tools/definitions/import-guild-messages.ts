@@ -3,8 +3,8 @@ import {
   getImportProgress,
   importAllGuildsAsync,
   importGuildMessages,
-} from "../utils/import.js";
-import { defineTool, jsonResult } from "./registry.js";
+} from "../../utils/import.js";
+import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録
 defineTool(
