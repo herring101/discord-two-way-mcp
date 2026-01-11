@@ -141,7 +141,28 @@ export class DiscordClient {
         if (!this.tmuxSession) return;
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
         const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
-        const summary = `[Activity] 過去${duration}分: ${totalCount}件のメッセージ`;
+
+        // 各チャンネルの件数をフォーマット
+        const details = Object.entries(counts)
+          .sort(([, a], [, b]) => b - a) // 件数順にソート
+          .map(([channelId, count]) => {
+            const channel = this.client.channels.cache.get(channelId);
+            let name = `ch:${channelId}`;
+
+            if (channel) {
+              if ("name" in channel && typeof channel.name === "string") {
+                name = `#${channel.name}`;
+              } else if (channel instanceof DMChannel) {
+                name = channel.recipient
+                  ? `DM(${channel.recipient.username})`
+                  : "DM";
+              }
+            }
+            return `${name}: ${count}`;
+          })
+          .join(", ");
+
+        const summary = `[Activity] 過去${duration}分: ${totalCount}件のメッセージ (${details})`;
         sendToTmux(this.tmuxSession, summary);
       },
       sendToAgent: (message: string) => {
