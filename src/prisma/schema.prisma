@@ -43,6 +43,7 @@ model Message {
   guild          Guild        @relation(fields: [guildId], references: [id], onDelete: Cascade)
   authorId       String
   authorUsername String
+  authorDisplayName String?   // サーバーニックネーム
   authorBot      Boolean      @default(false)
   content        String
   timestamp      DateTime // Discord message timestamp

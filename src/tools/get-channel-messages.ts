@@ -1,12 +1,12 @@
-import type { Client } from "discord.js";
+import { type Client, DMChannel } from "discord.js";
 import { saveMessages } from "../utils/database.js";
 import {
   fetchTextBasedChannel,
-  transformMessage,
   validateAndLimitNumber,
   wrapError,
 } from "../utils/discord.js";
-import { defineTool, jsonResult } from "./registry.js";
+import { type FormattableMessage, formatMessages } from "../utils/format.js";
+import { defineTool, textResult } from "./registry.js";
 
 // ツールを登録
 defineTool(
@@ -39,15 +39,37 @@ defineTool(
     try {
       const channel = await fetchTextBasedChannel(client, channelId);
       const messages = await channel.messages.fetch({ limit });
-      const messageArray = [...messages.values()];
-      const messageList = messageArray.reverse().map(transformMessage);
+      const messageArray = [...messages.values()].reverse();
 
       // DBに自動キャッシュ（非同期、エラーは無視）
       saveMessages(messageArray).catch((error) => {
         console.error("Failed to cache messages to DB:", error);
       });
 
-      return jsonResult({ messages: messageList });
+      // チャンネル名を取得
+      const channelName =
+        channel instanceof DMChannel ? null : (channel.name ?? null);
+
+      // FormattableMessage に変換
+      const formattableMessages: FormattableMessage[] = messageArray.map(
+        (msg) => ({
+          id: msg.id,
+          channelId: msg.channelId,
+          channelName,
+          author: {
+            id: msg.author.id,
+            username: msg.author.username,
+            displayName: msg.member?.displayName ?? msg.author.username,
+          },
+          content: msg.content,
+          timestamp: msg.createdAt,
+          attachments: msg.attachments.map((att) => ({
+            filename: att.name ?? "unknown",
+          })),
+        }),
+      );
+
+      return textResult(formatMessages(formattableMessages));
     } catch (error) {
       throw wrapError(error, "fetch messages");
     }

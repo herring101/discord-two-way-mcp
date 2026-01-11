@@ -1,9 +1,15 @@
-import { Client, GatewayIntentBits, type Message } from "discord.js";
+import { Client, DMChannel, GatewayIntentBits, type Message } from "discord.js";
 import {
   disconnectDatabase,
   initDatabase,
   saveMessage,
 } from "./utils/database.js";
+import {
+  type FormattableMessage,
+  formatDateSeparator,
+  formatMessage,
+  isSameDay,
+} from "./utils/format.js";
 import { importAllGuildsAsync } from "./utils/import.js";
 import { getTmuxSession, sendToTmux } from "./utils/tmux.js";
 
@@ -11,6 +17,7 @@ export class DiscordClient {
   private client: Client;
   private _isReady = false;
   private tmuxSession: string | null = null;
+  private lastNotifiedDate: Date | null = null;
 
   constructor() {
     this.client = new Client({
@@ -66,7 +73,8 @@ export class DiscordClient {
   }
 
   private handleMessage(message: Message): void {
-    if (message.author.bot) return;
+    // 自分自身（Bot）のメッセージは無視
+    if (message.author.id === this.client.user?.id) return;
 
     saveMessage(message).catch((error) => {
       console.error("Failed to save message to DB:", error);
@@ -82,7 +90,42 @@ export class DiscordClient {
   private notifyTmux(message: Message): void {
     if (!this.tmuxSession) return;
 
-    const notification = `[Discord] ${message.author.tag}: ${message.content}`;
+    // チャンネル名を取得
+    const channelName =
+      message.channel instanceof DMChannel
+        ? null
+        : "name" in message.channel
+          ? (message.channel.name as string)
+          : null;
+
+    // FormattableMessage に変換
+    const formattable: FormattableMessage = {
+      id: message.id,
+      channelId: message.channelId,
+      channelName,
+      author: {
+        id: message.author.id,
+        username: message.author.username,
+        displayName: message.member?.displayName ?? message.author.username,
+      },
+      content: message.content,
+      timestamp: message.createdAt,
+      attachments: message.attachments.map((att) => ({
+        filename: att.name ?? "unknown",
+      })),
+    };
+
+    // 日付セパレータの処理
+    if (
+      !this.lastNotifiedDate ||
+      !isSameDay(this.lastNotifiedDate, message.createdAt)
+    ) {
+      sendToTmux(this.tmuxSession, formatDateSeparator(message.createdAt));
+    }
+    this.lastNotifiedDate = message.createdAt;
+
+    // メッセージ本体を送信
+    const notification = formatMessage(formattable);
     sendToTmux(this.tmuxSession, notification);
   }
 

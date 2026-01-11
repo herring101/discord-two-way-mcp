@@ -1,7 +1,8 @@
 import type { Client } from "discord.js";
 import { getPrismaClient } from "../utils/database.js";
 import { wrapError } from "../utils/discord.js";
-import { defineTool, jsonResult } from "./registry.js";
+import { type FormattableMessage, formatMessages } from "../utils/format.js";
+import { defineTool, textResult } from "./registry.js";
 
 // ツールを登録
 defineTool(
@@ -72,9 +73,9 @@ defineTool(
     const dateTo = args.dateTo as string | undefined;
 
     if (!channelId && !guildId) {
-      return jsonResult({
-        error: "channelId または guildId のいずれかが必要です",
-      });
+      return textResult(
+        "エラー: channelId または guildId のいずれかが必要です",
+      );
     }
 
     try {
@@ -107,32 +108,32 @@ defineTool(
         take: limit,
         include: {
           attachments: true,
+          channel: true,
         },
       });
 
-      const results = messages.map((msg) => ({
+      // FormattableMessage に変換
+      const formattableMessages: FormattableMessage[] = messages.map((msg) => ({
         id: msg.id,
         channelId: msg.channelId,
-        guildId: msg.guildId,
+        channelName: msg.channel.name,
         author: {
           id: msg.authorId,
           username: msg.authorUsername,
-          bot: msg.authorBot,
+          displayName: msg.authorDisplayName ?? msg.authorUsername,
         },
         content: msg.content,
-        timestamp: msg.timestamp.toISOString(),
-        hasLink: msg.hasLink,
+        timestamp: msg.timestamp,
         attachments: msg.attachments.map((att) => ({
           filename: att.filename,
-          url: att.url,
-          contentType: att.contentType,
         })),
       }));
 
-      return jsonResult({
-        messages: results,
-        count: results.length,
-      });
+      // oldestの場合は時系列順（古い→新しい）に並び替え
+      const sortedMessages =
+        sortBy === "oldest" ? formattableMessages : formattableMessages;
+
+      return textResult(formatMessages(sortedMessages));
     } catch (error) {
       throw wrapError(error, "search messages");
     }

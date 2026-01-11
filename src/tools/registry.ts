@@ -141,3 +141,17 @@ export function jsonResult(data: unknown): ToolResult {
     ],
   };
 }
+
+/**
+ * プレーンテキスト結果を返すヘルパー
+ */
+export function textResult(text: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text,
+      },
+    ],
+  };
+}

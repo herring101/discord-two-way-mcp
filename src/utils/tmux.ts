@@ -30,14 +30,17 @@ const findEnvInAncestors = (key: string): string | null => {
       const stat = readFileSync(`/proc/${currentPid}/stat`, "utf-8");
       // カッコ内のコマンド名にスペースが含まれる可能性を考慮し、最後の ')' を探す
       const lastParenIndex = stat.lastIndexOf(")");
-      const parts = stat.substring(lastParenIndex + 1).trim().split(" ");
+      const parts = stat
+        .substring(lastParenIndex + 1)
+        .trim()
+        .split(" ");
       const ppidStr = parts[1];
       if (!ppidStr) break;
       const ppid = parseInt(ppidStr, 10);
 
       if (ppid === 0) break; // 親なし (init/kernel)
       currentPid = ppid;
-    } catch (error) {
+    } catch {
       // 権限エラーやプロセス消失などは無視して探索終了
       break;
     }
@@ -66,6 +69,7 @@ export function getTmuxSession(): string | null {
 
 /**
  * tmuxセッションにメッセージを送信
+ * メッセージ送信後1秒待ってから改行を送信する
  */
 export function sendToTmux(sessionName: string, message: string): boolean {
   try {
@@ -74,6 +78,18 @@ export function sendToTmux(sessionName: string, message: string): boolean {
     execSync(`tmux send-keys -t '${sessionName}' '${escapedMessage}' Enter`, {
       encoding: "utf-8",
     });
+
+    // 1秒後に改行を送信（非同期）
+    setTimeout(() => {
+      try {
+        execSync(`tmux send-keys -t '${sessionName}' Enter`, {
+          encoding: "utf-8",
+        });
+      } catch {
+        // 改行送信の失敗は無視
+      }
+    }, 1000);
+
     return true;
   } catch (error) {
     console.error("Failed to send message to tmux:", error);

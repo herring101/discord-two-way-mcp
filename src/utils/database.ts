@@ -176,6 +176,7 @@ export async function saveMessage(message: Message): Promise<void> {
     where: { id: message.id },
     update: {
       content: message.content,
+      authorDisplayName: message.member?.displayName ?? message.author.username,
       embeds: JSON.stringify(message.embeds.map((e) => e.toJSON())),
       hasLink: /https?:\/\/[^\s]+/.test(message.content),
       hasAttachment: message.attachments.size > 0,
@@ -186,6 +187,7 @@ export async function saveMessage(message: Message): Promise<void> {
       guildId,
       authorId: message.author.id,
       authorUsername: message.author.username,
+      authorDisplayName: message.member?.displayName ?? message.author.username,
       authorBot: message.author.bot,
       content: message.content,
       timestamp: message.createdAt,
