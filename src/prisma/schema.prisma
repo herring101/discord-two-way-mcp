@@ -73,3 +73,27 @@ model Attachment {
   @@index([messageId])
   @@index([url])
 }
+
+// ============================================================
+// エージェントライフサイクル管理
+// ============================================================
+
+model AgentState {
+  id             String   @id @default("singleton")
+  mode           String   // "OFF" | "AWAKE_NOT_WATCHING" | "AWAKE_WATCHING"
+  focusChannelId String?
+  lastWakeAt     DateTime?
+  lastSleepAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ChannelReadState {
+  channelId         String   @id
+  guildId           String
+  lastReadMessageId String?
+  unreadCount       Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@index([guildId])
+}
