@@ -7,6 +7,9 @@ import {
 
 import { DiscordClient } from "./discord/client.js";
 import { toolRegistry } from "./mcp/tools/index.js";
+import { getLogger } from "./shared/logger.js";
+
+const logger = getLogger("main");
 
 // Initialize Discord client
 const discordClient = new DiscordClient();
@@ -44,16 +47,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   try {
     // Start MCP server first
-    console.error("Starting MCP server...");
+    logger.info("Starting MCP server...");
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
     // Connect to Discord only after MCP is ready
     await discordClient.connect();
 
-    console.error("Discord Two-Way MCP server is running");
+    logger.info("Discord Two-Way MCP server is running");
   } catch (error) {
-    console.error("Failed to start server:", error);
+    logger.error("Failed to start server:", error);
     await discordClient.disconnect();
     throw error;
   }
@@ -61,20 +64,20 @@ async function main() {
 
 // Handle graceful shutdown
 process.on("SIGINT", async () => {
-  console.error("Shutting down...");
+  logger.info("Shutting down...");
   await discordClient.disconnect();
   process.exit(0);
 });
 
 // Handle transport close
 process.on("SIGTERM", async () => {
-  console.error("Received SIGTERM, shutting down...");
+  logger.info("Received SIGTERM, shutting down...");
   await discordClient.disconnect();
   process.exit(0);
 });
 
 // Start the server
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  logger.error("Fatal error:", error);
   process.exit(1);
 });

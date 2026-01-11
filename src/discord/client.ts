@@ -25,9 +25,12 @@ import {
   formatMessage,
   isSameDay,
 } from "../shared/format.js";
+import { getLogger } from "../shared/logger.js";
 import { getTmuxSession, sendToTmux } from "../shared/tmux.js";
 import { importAllGuildsAsync } from "./import.js";
 import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
+
+const logger = getLogger("discord");
 
 // グローバルコントローラーインスタンス（ツールからアクセス用）
 let lifecycleController: LifecycleController | null = null;
@@ -57,9 +60,9 @@ export class DiscordClient {
     // tmuxセッションを検出
     this.tmuxSession = getTmuxSession();
     if (!this.tmuxSession) {
-      console.error("⚠️ Warning: tmuxセッションが検出されませんでした。");
+      logger.warn("tmuxセッションが検出されませんでした");
     } else {
-      console.error(`tmux session detected: ${this.tmuxSession}`);
+      logger.info(`tmux session detected: ${this.tmuxSession}`);
     }
 
     this.setupEventHandlers();
@@ -67,13 +70,13 @@ export class DiscordClient {
 
   private setupEventHandlers(): void {
     this.client.once("clientReady", async () => {
-      console.error(`Discord bot logged in as ${this.client.user?.tag}`);
+      logger.info(`Discord bot logged in as ${this.client.user?.tag}`);
       this.botUserId = this.client.user?.id ?? null;
 
       if (this.client.user) {
         try {
           const { isNewDatabase } = await initDatabase(this.client.user.id);
-          console.error(`Database initialized for bot ${this.client.user.id}`);
+          logger.info(`Database initialized for bot ${this.client.user.id}`);
 
           // LifecycleController を初期化
           this.initializeLifecycleController();
@@ -82,18 +85,18 @@ export class DiscordClient {
           const token = process.env.DISCORD_BOT_TOKEN;
           if (token) {
             registerSlashCommands(this.client, token).catch((error) => {
-              console.error("Failed to register slash commands:", error);
+              logger.error("Failed to register slash commands:", error);
             });
           }
 
           if (isNewDatabase) {
-            console.error(
+            logger.info(
               "[Import] New database detected, starting initial import...",
             );
             importAllGuildsAsync(this.client);
           }
         } catch (error) {
-          console.error("Failed to initialize database:", error);
+          logger.error("Failed to initialize database:", error);
         }
       }
 
@@ -101,7 +104,7 @@ export class DiscordClient {
     });
 
     this.client.on("error", (error) => {
-      console.error("Discord error:", error);
+      logger.error("Discord error:", error);
     });
 
     this.client.on("messageCreate", (message: Message) => {
@@ -112,7 +115,7 @@ export class DiscordClient {
     this.client.on(Events.InteractionCreate, (interaction: Interaction) => {
       if (interaction.isChatInputCommand()) {
         handleSlashCommand(interaction).catch((error) => {
-          console.error("Failed to handle slash command:", error);
+          logger.error("Failed to handle slash command:", error);
         });
       }
     });
@@ -124,14 +127,14 @@ export class DiscordClient {
     // OutputHandler の実装
     const handler: OutputHandler = {
       onWatchingStarted: (focusChannelId: ChannelId) => {
-        console.error(`[Lifecycle] WATCHING started: focus=${focusChannelId}`);
+        logger.debug(`[Lifecycle] WATCHING started: focus=${focusChannelId}`);
       },
       onWatchingEnded: () => {
-        console.error("[Lifecycle] WATCHING ended");
+        logger.debug("[Lifecycle] WATCHING ended");
       },
       onFocusMessage: (channelId: ChannelId, messageId: MessageId) => {
         // このメッセージはtmuxに送信される（後で実装）
-        console.error(
+        logger.debug(
           `[Lifecycle] Focus message: ch=${channelId}, msg=${messageId}`,
         );
       },
@@ -178,10 +181,10 @@ export class DiscordClient {
 
     // 初期化（起動時刻で状態を決定）
     this.controller.initialize().catch((error) => {
-      console.error("Failed to initialize lifecycle controller:", error);
+      logger.error("Failed to initialize lifecycle controller:", error);
     });
 
-    console.error("[Lifecycle] Controller initialized");
+    logger.info("[Lifecycle] Controller initialized");
   }
 
   private handleMessage(message: Message): void {
@@ -192,10 +195,10 @@ export class DiscordClient {
 
     // メッセージをDBに保存
     saveMessage(message).catch((error) => {
-      console.error("Failed to save message to DB:", error);
+      logger.error("Failed to save message to DB:", error);
     });
 
-    console.error(
+    logger.debug(
       `[MSG] ${message.author.tag}: ${message.content.slice(0, 50)}${message.content.length > 50 ? "..." : ""}`,
     );
 
@@ -230,7 +233,7 @@ export class DiscordClient {
           }
         })
         .catch((error) => {
-          console.error("Failed to process message in lifecycle:", error);
+          logger.error("Failed to process message in lifecycle:", error);
         });
     } else {
       // コントローラーがない場合は従来通り全て通知
@@ -305,7 +308,7 @@ export class DiscordClient {
     if (!token) {
       throw new Error("DISCORD_BOT_TOKEN environment variable is required");
     }
-    console.error("Connecting to Discord...");
+    logger.info("Connecting to Discord...");
     await this.client.login(token);
   }
 

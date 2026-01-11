@@ -1,4 +1,7 @@
 import { readFileSync } from "node:fs";
+import { getLogger } from "./logger.js";
+
+const logger = getLogger("tmux");
 
 /**
  * プロセスツリーを遡って特定の環境変数の値を取得する
@@ -92,7 +95,7 @@ export function sendToTmux(sessionName: string, message: string): boolean {
 
     return true;
   } catch (error) {
-    console.error("Failed to send message to tmux:", error);
+    logger.error("Failed to send message to tmux:", error);
     return false;
   }
 }

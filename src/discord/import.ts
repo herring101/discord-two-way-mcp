@@ -8,6 +8,9 @@ import {
   type ThreadChannel,
 } from "discord.js";
 import { getPrismaClient, saveGuild, saveMessage } from "../db/client.js";
+import { getLogger } from "../shared/logger.js";
+
+const logger = getLogger("import");
 
 const BATCH_SIZE = 100;
 const DELAY_MS = 500;
@@ -122,7 +125,7 @@ async function importChannelMessages(
       lastMessageId = messages.last()?.id;
       await delay(DELAY_MS);
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to fetch messages for ${channelName}:`,
         error instanceof Error ? error.message : error,
       );
@@ -156,7 +159,7 @@ async function importForumThreads(
       importProgress.channelCount++;
     }
   } catch (error) {
-    console.error(
+    logger.error(
       `Failed to import forum threads:`,
       error instanceof Error ? error.message : error,
     );
@@ -174,7 +177,7 @@ export async function importGuildMessages(
   await saveGuild(guild);
 
   importProgress.currentGuild = guild.name;
-  console.error(`[Import] Starting import for guild: ${guild.name}`);
+  logger.info(`Starting import for guild: ${guild.name}`);
 
   const channels = await guild.channels.fetch();
   let messageCount = 0;
@@ -197,12 +200,12 @@ export async function importGuildMessages(
       messageCount += count;
       channelCount++;
       importProgress.channelCount++;
-      console.error(`[Import] Channel #${channel.name}: ${count} messages`);
+      logger.info(`Channel #${channel.name}: ${count} messages`);
     }
   }
 
-  console.error(
-    `[Import] Guild ${guild.name} complete: ${channelCount} channels, ${messageCount} messages`,
+  logger.info(
+    `Guild ${guild.name} complete: ${channelCount} channels, ${messageCount} messages`,
   );
   importProgress.guildCount++;
 
@@ -214,7 +217,7 @@ export async function importGuildMessages(
  */
 export function importAllGuildsAsync(client: Client): void {
   if (importProgress.isRunning) {
-    console.error("[Import] Import already in progress, skipping...");
+    logger.warn("Import already in progress, skipping...");
     return;
   }
 
@@ -229,26 +232,24 @@ export function importAllGuildsAsync(client: Client): void {
   (async () => {
     try {
       const guilds = client.guilds.cache;
-      console.error(
-        `[Import] Starting async import for ${guilds.size} guilds...`,
-      );
+      logger.info(`Starting async import for ${guilds.size} guilds...`);
 
       for (const guild of guilds.values()) {
         try {
           await importGuildMessages(client, guild.id);
         } catch (error) {
-          console.error(
-            `[Import] Failed to import guild ${guild.name}:`,
+          logger.error(
+            `Failed to import guild ${guild.name}:`,
             error instanceof Error ? error.message : error,
           );
         }
       }
 
-      console.error(
-        `[Import] All guilds import complete: ${importProgress.guildCount} guilds, ${importProgress.channelCount} channels, ${importProgress.messageCount} messages`,
+      logger.info(
+        `All guilds import complete: ${importProgress.guildCount} guilds, ${importProgress.channelCount} channels, ${importProgress.messageCount} messages`,
       );
     } catch (error) {
-      console.error("[Import] Fatal error:", error);
+      logger.error("Fatal error:", error);
     } finally {
       importProgress.isRunning = false;
     }

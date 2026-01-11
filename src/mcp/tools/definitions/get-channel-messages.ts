@@ -9,7 +9,10 @@ import {
   type FormattableMessage,
   formatMessages,
 } from "../../../shared/format.js";
+import { getLogger } from "../../../shared/logger.js";
 import { defineTool, textResult } from "../registry.js";
+
+const logger = getLogger("mcp");
 
 // ツールを登録
 defineTool(
@@ -46,7 +49,7 @@ defineTool(
 
       // DBに自動キャッシュ（非同期、エラーは無視）
       saveMessages(messageArray).catch((error) => {
-        console.error("Failed to cache messages to DB:", error);
+        logger.error("Failed to cache messages to DB:", error);
       });
 
       // チャンネル名を取得

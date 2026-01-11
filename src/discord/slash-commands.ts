@@ -12,7 +12,10 @@ import {
 import { getPrismaClient } from "../db/client.js";
 import { defaultConfig } from "../lifecycle/config.js";
 import { getUnreadSummary } from "../lifecycle/unread.js";
+import { getLogger } from "../shared/logger.js";
 import { getLifecycleController } from "./client.js";
+
+const logger = getLogger("slash-cmd");
 
 // コマンド定義
 const commands = [
@@ -37,7 +40,7 @@ export async function registerSlashCommands(
   const rest = new REST({ version: "10" }).setToken(token);
 
   try {
-    console.error("[SlashCommands] Registering commands...");
+    logger.info("Registering commands...");
 
     const clientId = client.user?.id;
     if (!clientId) {
@@ -48,9 +51,9 @@ export async function registerSlashCommands(
       body: commands.map((cmd) => cmd.toJSON()),
     });
 
-    console.error("[SlashCommands] Commands registered successfully");
+    logger.info("Commands registered successfully");
   } catch (error) {
-    console.error("[SlashCommands] Failed to register commands:", error);
+    logger.error("Failed to register commands:", error);
   }
 }
 
@@ -150,7 +153,7 @@ async function handleUnreadCommand(
       flags: 64,
     });
   } catch (error) {
-    console.error("Failed to get unread summary:", error);
+    logger.error("Failed to get unread summary:", error);
     await interaction.reply({
       content: "⚠️ 未読サマリーの取得に失敗しました",
       flags: 64,

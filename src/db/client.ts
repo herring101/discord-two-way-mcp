@@ -1,21 +1,18 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 import type { Channel, Guild, Message } from "discord.js";
+import { getLogger } from "../shared/logger.js";
+import { PrismaClient } from "./generated/prisma/client.js";
+
+const logger = getLogger("db");
 
 let prisma: PrismaClient | null = null;
 let currentBotId: string | null = null;
 
 const DATA_DIR = join(import.meta.dirname, "../../data/db");
-const SCHEMA_PATH = join(import.meta.dirname, "../db/prisma/schema.prisma");
-
-/**
- * Bot IDからデータベースURLを生成
- */
-function getDatabaseUrl(botId: string): string {
-  return `file:${join(DATA_DIR, `bot_${botId}.sqlite`)}`;
-}
+const SCHEMA_PATH = join(import.meta.dirname, "./prisma/schema.prisma");
 
 /**
  * DBファイルのパスを取得
@@ -32,8 +29,8 @@ export interface InitDatabaseResult {
 /**
  * Bot用のデータベースを初期化
  * - DBディレクトリが存在しなければ作成
- * - マイグレーションを実行
- * - PrismaClientを初期化
+ * - スキーマをプッシュ
+ * - PrismaClientをドライバーアダプター経由で初期化
  * @returns PrismaClientと新規作成かどうかのフラグ
  */
 export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
@@ -57,35 +54,39 @@ export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
   const dbFilePath = getDbFilePath(botId);
   const isNewDatabase = !existsSync(dbFilePath);
 
-  const databaseUrl = getDatabaseUrl(botId);
-  process.env.DATABASE_URL = databaseUrl;
+  logger.info(`Initializing database for bot ${botId}...`);
 
-  // マイグレーションを実行（DBが存在しなければ作成される）
-  console.error(`Initializing database for bot ${botId}...`);
-  try {
-    execSync(`bunx prisma db push --schema="${SCHEMA_PATH}" --skip-generate`, {
-      encoding: "utf-8",
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    console.error(`Database initialized: ${databaseUrl}`);
-  } catch (error) {
-    console.error("Failed to push database schema:", error);
-    throw error;
+  const databaseUrl = `file:${dbFilePath}`;
+
+  // スキーマをプッシュ（テーブル作成）- ローカルの Prisma CLI を使用
+  if (isNewDatabase) {
+    const prismaPath = join(
+      import.meta.dirname,
+      "../../node_modules/.bin/prisma",
+    );
+    try {
+      execSync(
+        `"${prismaPath}" db push --schema="${SCHEMA_PATH}" --url="${databaseUrl}"`,
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+      logger.info("Database schema pushed successfully");
+    } catch (error) {
+      logger.error("Failed to push database schema:", error);
+      throw error;
+    }
   }
 
-  // PrismaClientを初期化
-  prisma = new PrismaClient({
-    datasources: {
-      db: {
-        url: databaseUrl,
-      },
-    },
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
+  // Prisma 7: libsql アダプターファクトリーを使用（Bun 対応）
+  const adapter = new PrismaLibSql({
+    url: databaseUrl,
   });
+
+  prisma = new PrismaClient({ adapter });
+
+  logger.info(`Database initialized: ${dbFilePath}`);
 
   currentBotId = botId;
   return { prisma, isNewDatabase };
@@ -226,7 +227,7 @@ export async function saveMessages(messages: Message[]): Promise<void> {
     try {
       await saveMessage(message);
     } catch (error) {
-      console.error(`Failed to save message ${message.id}:`, error);
+      logger.error(`Failed to save message ${message.id}:`, error);
     }
   }
 }
