@@ -41,6 +41,7 @@ export class DiscordClient {
   private _isReady = false;
   private tmuxSession: string | null = null;
   private lastNotifiedDate: Date | null = null;
+  private botUserId: string | null = null;
   private controller: LifecycleController | null = null;
 
   constructor() {
@@ -67,6 +68,7 @@ export class DiscordClient {
   private setupEventHandlers(): void {
     this.client.once("clientReady", async () => {
       console.error(`Discord bot logged in as ${this.client.user?.tag}`);
+      this.botUserId = this.client.user?.id ?? null;
 
       if (this.client.user) {
         try {
@@ -184,7 +186,9 @@ export class DiscordClient {
 
   private handleMessage(message: Message): void {
     // 自分自身（Bot）のメッセージは無視
-    if (message.author.id === this.client.user?.id) return;
+    // botUserId が設定されている場合は優先して使用、なければ client.user.id を使用
+    const botId = this.botUserId ?? this.client.user?.id;
+    if (botId && message.author.id === botId) return;
 
     // メッセージをDBに保存
     saveMessage(message).catch((error) => {
