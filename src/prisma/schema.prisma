@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Guild {
+  id        String    @id // Discord snowflake ID
+  name      String
+  icon      String?
+  channels  Channel[]
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Channel {
+  id        String    @id // Discord snowflake ID
+  guildId   String
+  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  name      String
+  type      Int // Discord channel type
+  position  Int?
+  parentId  String? // Parent channel ID (for threads and forum posts)
+  archived  Boolean   @default(false)
+  locked    Boolean   @default(false)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([guildId])
+  @@index([parentId])
+}
+
+model Message {
+  id             String       @id // Discord snowflake ID
+  channelId      String
+  channel        Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  guildId        String
+  guild          Guild        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  authorId       String
+  authorUsername String
+  authorBot      Boolean      @default(false)
+  content        String
+  timestamp      DateTime // Discord message timestamp
+  attachments    Attachment[]
+  embeds         String // Store embeds as JSON string (SQLite doesn't support Json[])
+  hasLink        Boolean      @default(false)
+  hasAttachment  Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([channelId])
+  @@index([guildId])
+  @@index([authorId])
+  @@index([timestamp])
+}
+
+model Attachment {
+  id          String   @id @default(uuid())
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  filename    String
+  url         String
+  size        Int?
+  contentType String?
+  createdAt   DateTime @default(now())
+
+  @@index([messageId])
+  @@index([url])
+}

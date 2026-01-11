@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "discord-log": {
+            "command": "bun",
+            "args": [
+                "run",
+                "/home/herring/mcp/experiments/discord-log-mcp/src/index.ts"
+            ],
+            "env": {
+                "DISCORD_BOT_TOKEN": "YOUR_TOKEN_HERE"
+            }
+        }
+    }
+}
