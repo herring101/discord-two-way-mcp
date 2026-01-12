@@ -10,6 +10,7 @@ import "./definitions/import-guild-messages.js";
 import "./definitions/reply-to-message.js";
 import "./definitions/search-messages.js";
 import "./definitions/send-message.js";
+import "./definitions/upload-file.js";
 
 // レジストリをエクスポート
 export { toolRegistry } from "./registry.js";
