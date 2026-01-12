@@ -296,6 +296,28 @@ export class DiscordClient {
       }),
     );
 
+    // リプライ先情報を取得
+    let replyTo: { messageId: string; content: string } | undefined;
+    if (message.reference?.messageId) {
+      try {
+        const replyMessage = await message.fetchReference();
+        const contentPreview = replyMessage.content.slice(0, 50);
+        replyTo = {
+          messageId: message.reference.messageId,
+          content:
+            replyMessage.content.length > 50
+              ? `${contentPreview}...`
+              : contentPreview,
+        };
+      } catch {
+        // リプライ先が削除されている場合など
+        replyTo = {
+          messageId: message.reference.messageId,
+          content: "(削除済み)",
+        };
+      }
+    }
+
     // FormattableMessage に変換
     const formattable: FormattableMessage = {
       id: message.id,
@@ -309,6 +331,7 @@ export class DiscordClient {
       content: message.content,
       timestamp: message.createdAt,
       attachments: parsedAttachments,
+      replyTo,
     };
 
     // 日付セパレータの処理

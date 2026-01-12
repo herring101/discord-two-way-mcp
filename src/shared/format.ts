@@ -22,6 +22,10 @@ export interface FormattableMessage {
     parsedContent?: string; // 解析成功時の内容
     parseError?: string; // 解析エラー時のメッセージ
   }>;
+  replyTo?: {
+    messageId: string;
+    content: string; // リプライ先の内容（截あり）
+  };
 }
 
 /**
@@ -77,8 +81,13 @@ export function formatMessage(msg: FormattableMessage): string {
   // メッセージID
   const msgIdPart = `[msg:${msg.id}]`;
 
+  // リプライ先情報
+  const replyPart = msg.replyTo
+    ? ` (reply to msg:${msg.replyTo.messageId} "${msg.replyTo.content}")`
+    : "";
+
   // ヘッダー行
-  const header = `${channelPart} ${userPart} - ${timePart} ${msgIdPart}`;
+  const header = `${channelPart} ${userPart} - ${timePart} ${msgIdPart}${replyPart}`;
 
   // 内容行（添付ファイルがあれば追加）
   let content = msg.content;
