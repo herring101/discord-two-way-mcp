@@ -7,6 +7,7 @@ Discordメッセージをリアルタイムでターミナルに通知し、AI�
 ## 特徴
 
 - **双方向通信**: Discordのメッセージ受信・送信・返信・リアクションが可能
+- **添付ファイル解析**: Gemini APIを使用して画像・音声・PDF等を自動要約（オプション）
 - **ライフサイクル管理**:
   - `OFF` (睡眠): 時間帯による自動スリープ
   - `AWAKE_NOT_WATCHING` (待機): 起床中だが監視していない状態
@@ -43,7 +44,8 @@ Discordメッセージをリアルタイムでターミナルに通知し、AI�
 4. **環境変数の設定**
    MCP設定ファイルに直接記述します。
    ```bash
-   DISCORD_BOT_TOKEN="your_discord_bot_token"
+   DISCORD_BOT_TOKEN="your_discord_bot_token"  # 必須
+   GEMINI_API_KEY="your_gemini_api_key"        # オプション：添付ファイル解析に必要
    ```
 
 ## セットアップ
@@ -69,12 +71,28 @@ AIアシスタントの設定ファイルにサーバーを追加します。
       "args": ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"],
       "env": {
         "DISCORD_BOT_TOKEN": "your_bot_token",
-        "LANG": "ja_JP.UTF-8"
+        "GEMINI_API_KEY": "your_gemini_api_key"
       }
     }
   }
 }
 ```
+
+### OpenAI Codex CLI (`~/.codex/config.toml`)
+
+```toml
+[features]
+web_search_request = true
+
+[mcp_servers.discord-two-way]
+command = "bun"
+args = ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"]
+
+[mcp_servers.discord-two-way.env]
+DISCORD_BOT_TOKEN = "your_bot_token"
+GEMINI_API_KEY = "your_gemini_api_key"
+```
+
 
 ## 利用方法
 

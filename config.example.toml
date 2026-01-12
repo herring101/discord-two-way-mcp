@@ -7,3 +7,4 @@ args = [
 
 [mcp_servers.discord-two-way.env]
 DISCORD_BOT_TOKEN = "YOUR_TOKEN_HERE"
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"  # オプション：設定すると添付ファイルを解析

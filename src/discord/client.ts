@@ -20,6 +20,7 @@ import {
   type OutputHandler,
   type UnreadSummaryWithDetails,
 } from "../lifecycle/index.js";
+import { parseAttachment } from "../shared/attachment-parser.js";
 import {
   type FormattableMessage,
   formatDateSeparator,
@@ -221,7 +222,7 @@ export class DiscordClient {
           guildId,
           isMentionOrReplyToAgent,
         )
-        .then(() => {
+        .then(async () => {
           // コントローラーの状態に応じて通知
           const state = this.controller?.getState();
           if (state?.mode === "AWAKE_WATCHING") {
@@ -230,11 +231,11 @@ export class DiscordClient {
               state.focusChannelId === message.channelId ||
               isMentionOrReplyToAgent
             ) {
-              this.notifyTmux(message);
+              await this.notifyTmux(message);
             }
           } else if (isMentionOrReplyToAgent) {
             // WATCHING以外でもメンション/リプライは通知
-            this.notifyTmux(message);
+            await this.notifyTmux(message);
           }
         })
         .catch((error) => {
@@ -242,7 +243,9 @@ export class DiscordClient {
         });
     } else {
       // コントローラーがない場合は従来通り全て通知
-      this.notifyTmux(message);
+      this.notifyTmux(message).catch((error) => {
+        logger.error("Failed to notify tmux:", error);
+      });
     }
   }
 
@@ -266,7 +269,7 @@ export class DiscordClient {
     return false;
   }
 
-  private notifyTmux(message: Message): void {
+  private async notifyTmux(message: Message): Promise<void> {
     if (!this.tmuxSession) return;
 
     // チャンネル名を取得
@@ -276,6 +279,22 @@ export class DiscordClient {
         : "name" in message.channel
           ? (message.channel.name as string)
           : null;
+
+    // 添付ファイルを並列解析
+    const parsedAttachments = await Promise.all(
+      message.attachments.map(async (att) => {
+        const result = await parseAttachment(
+          att.url,
+          att.contentType,
+          att.name ?? "unknown",
+        );
+        return {
+          filename: att.name ?? "unknown",
+          parsedContent: result.parsed ? result.content : undefined,
+          parseError: !result.parsed && result.error ? result.error : undefined,
+        };
+      }),
+    );
 
     // FormattableMessage に変換
     const formattable: FormattableMessage = {
@@ -289,9 +308,7 @@ export class DiscordClient {
       },
       content: message.content,
       timestamp: message.createdAt,
-      attachments: message.attachments.map((att) => ({
-        filename: att.name ?? "unknown",
-      })),
+      attachments: parsedAttachments,
     };
 
     // 日付セパレータの処理

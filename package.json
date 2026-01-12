@@ -18,6 +18,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@google/genai": "^1.35.0",
     "@libsql/client": "^0.14",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@prisma/adapter-libsql": "^7",

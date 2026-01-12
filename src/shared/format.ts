@@ -17,7 +17,11 @@ export interface FormattableMessage {
   };
   content: string;
   timestamp: Date;
-  attachments?: Array<{ filename: string }>;
+  attachments?: Array<{
+    filename: string;
+    parsedContent?: string; // 解析成功時の内容
+    parseError?: string; // 解析エラー時のメッセージ
+  }>;
 }
 
 /**
@@ -79,10 +83,13 @@ export function formatMessage(msg: FormattableMessage): string {
   // 内容行（添付ファイルがあれば追加）
   let content = msg.content;
   if (msg.attachments && msg.attachments.length > 0) {
-    const filenames = msg.attachments.map((a) => a.filename).join(", ");
-    content = content
-      ? `${content} (添付: ${filenames})`
-      : `(添付: ${filenames})`;
+    const attachmentTexts = msg.attachments.map((a) => {
+      if (a.parsedContent) return `[${a.filename}] ${a.parsedContent}`;
+      if (a.parseError) return `[${a.filename}] ⚠️ ${a.parseError}`;
+      return `[${a.filename}]`;
+    });
+    const attachmentSection = `---添付ファイル---\n${attachmentTexts.join("\n")}`;
+    content = content ? `${content}\n${attachmentSection}` : attachmentSection;
   }
 
   return `${header}\n${content}`;
