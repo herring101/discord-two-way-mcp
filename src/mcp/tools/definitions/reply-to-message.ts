@@ -1,5 +1,6 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "discord.js";
+import { getLifecycleController } from "../../../discord/client.js";
 import {
   fetchTextBasedChannel,
   validateMessageContent,
@@ -45,6 +46,12 @@ defineTool(
       }
 
       const reply = await originalMessage.reply(content);
+
+      // focusチャンネルを切り替え
+      const controller = getLifecycleController();
+      if (controller) {
+        await controller.setFocusChannel(channelId);
+      }
 
       return jsonResult({
         success: true,

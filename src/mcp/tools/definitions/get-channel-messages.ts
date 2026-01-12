@@ -1,5 +1,6 @@
 import { type Client, DMChannel } from "discord.js";
 import { saveMessages } from "../../../db/client.js";
+import { getLifecycleController } from "../../../discord/client.js";
 import {
   fetchTextBasedChannel,
   validateAndLimitNumber,
@@ -51,6 +52,12 @@ defineTool(
       saveMessages(messageArray).catch((error) => {
         logger.error("Failed to cache messages to DB:", error);
       });
+
+      // focusチャンネルを切り替え
+      const controller = getLifecycleController();
+      if (controller) {
+        await controller.setFocusChannel(channelId);
+      }
 
       // チャンネル名を取得
       const channelName =

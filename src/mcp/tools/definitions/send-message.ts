@@ -1,4 +1,5 @@
 import type { Client } from "discord.js";
+import { getLifecycleController } from "../../../discord/client.js";
 import {
   fetchTextBasedChannel,
   validateMessageContent,
@@ -33,6 +34,12 @@ defineTool(
     try {
       const channel = await fetchTextBasedChannel(client, channelId);
       const sentMessage = await channel.send(content);
+
+      // focusチャンネルを切り替え
+      const controller = getLifecycleController();
+      if (controller) {
+        await controller.setFocusChannel(channelId);
+      }
 
       return jsonResult({
         success: true,
