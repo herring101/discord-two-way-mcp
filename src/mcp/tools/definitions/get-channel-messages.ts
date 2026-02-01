@@ -53,10 +53,15 @@ defineTool(
         logger.error("Failed to cache messages to DB:", error);
       });
 
-      // focusチャンネルを切り替え
+      // focusチャンネルを切り替え、未読を既読化
       const controller = getLifecycleController();
       if (controller) {
         await controller.setFocusChannel(channelId);
+        // 最新メッセージIDで既読化
+        if (messageArray.length > 0) {
+          const latestMessageId = messageArray[messageArray.length - 1].id;
+          await controller.onChannelMessagesRead(channelId, latestMessageId);
+        }
       }
 
       // チャンネル名を取得
