@@ -371,7 +371,7 @@ export class LifecycleController {
   listReminders(): ScheduledJob[] {
     return this.scheduler
       .listJobs()
-      .filter((job) => job.payload.type === "reminder");
+      .filter((job) => job.payload.type === "reminder" && job.enabled);
   }
 
   /**

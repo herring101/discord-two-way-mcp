@@ -383,13 +383,13 @@ export class Scheduler {
         this.scheduleTimer(job);
       }
     } else {
-      // once ジョブは無効化
-      job.enabled = false;
-      job.nextRunAt = null;
-      await this.prisma.scheduledJob.update({
+      // once ジョブはメモリから削除し、DBも削除
+      this.clearTimer(jobId);
+      this.jobs.delete(jobId);
+      await this.prisma.scheduledJob.delete({
         where: { id: jobId },
-        data: { enabled: false, nextRunAt: null },
       });
+      logger.debug(`[Scheduler] Removed completed once job: ${job.name}`);
     }
   }
 
