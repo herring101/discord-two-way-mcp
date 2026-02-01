@@ -24,7 +24,7 @@ async function runTest(
   name: string,
   file: { url: string; contentType: string; filename: string },
 ) {
-  console.log(`\n--- Testing ${name} ---`);
+  console.log(`\n=== Testing ${name} ===`);
   console.log(`URL: ${file.url}`);
   console.log(`Content-Type: ${file.contentType}`);
 

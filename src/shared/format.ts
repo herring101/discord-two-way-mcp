@@ -41,13 +41,13 @@ export function isSameDay(a: Date, b: Date): boolean {
 
 /**
  * 日付セパレータを生成
- * 例: "--- 2026年1月11日 ---"
+ * 例: "=== 2026年1月11日 ==="
  */
 export function formatDateSeparator(date: Date): string {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
   const day = date.getDate();
-  return `--- ${year}年${month}月${day}日 ---`;
+  return `=== ${year}年${month}月${day}日 ===`;
 }
 
 /**
@@ -97,7 +97,7 @@ export function formatMessage(msg: FormattableMessage): string {
       if (a.parseError) return `[${a.filename}] ⚠️ ${a.parseError}`;
       return `[${a.filename}]`;
     });
-    const attachmentSection = `---添付ファイル---\n${attachmentTexts.join("\n")}`;
+    const attachmentSection = `===添付ファイル===\n${attachmentTexts.join("\n")}`;
     content = content ? `${content}\n${attachmentSection}` : attachmentSection;
   }
 
