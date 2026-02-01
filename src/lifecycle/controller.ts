@@ -26,7 +26,6 @@ import { toChannelId, toUnixMs } from "./types.js";
 import {
   addUnreadMessage,
   formatUnreadSummary,
-  getRecentUnreadMessages,
   getUnreadSummary,
   markAsRead,
 } from "./unread.js";
@@ -498,14 +497,15 @@ export class LifecycleController {
     }
 
     const nowMs = Date.now();
-    const durationMinutes =
-      (nowMs - (this.activityWindowStartMs ?? nowMs)) / 1000 / 60;
 
-    // 少なくとも5分間、あるいはウィンドウ開始からの未読を取得
-    const summary = await getRecentUnreadMessages(
-      this.prisma,
-      Math.max(5, Math.ceil(durationMinutes)),
-    );
+    // 全未読を取得し、UnreadSummaryWithDetails に変換
+    const rawSummary = await getUnreadSummary(this.prisma);
+    const summary: UnreadSummaryWithDetails[] = rawSummary.map((s) => ({
+      channelId: s.channelId,
+      guildId: s.guildId,
+      unreadCount: s.unreadCount,
+      messages: [],
+    }));
 
     this.dispatch({
       type: "ACTIVITY_TICK",
