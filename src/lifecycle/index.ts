@@ -32,7 +32,6 @@ export {
 export {
   addUnreadMessage,
   formatUnreadSummary,
-  getRecentUnreadMessages,
   getUnreadSummary,
   markAsRead,
   type UnreadSummary,
