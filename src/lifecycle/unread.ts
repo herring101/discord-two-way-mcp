@@ -185,7 +185,7 @@ export function formatUnreadSummary(summaries: UnreadSummary[]): string | null {
     return null;
   }
 
-  const lines = ["--- 未読サマリー ---"];
+  const lines = ["=== 未読サマリー ==="];
   for (const s of summaries) {
     lines.push(`ch:${s.channelId} - ${s.unreadCount}件の未読`);
   }
