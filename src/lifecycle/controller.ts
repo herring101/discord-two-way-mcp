@@ -4,11 +4,12 @@
  */
 
 import type { PrismaClient } from "../db/generated/prisma/client.js";
+import type { Schedule, ScheduledJob } from "../scheduler/index.js";
+import { isPastTime, Scheduler } from "../scheduler/index.js";
 import {
   defaultConfig,
   isInSleepWindow,
   type LifecycleConfig,
-  sampleExponential,
 } from "./config.js";
 import { reduce } from "./reducer.js";
 import type {
@@ -45,6 +46,10 @@ export interface OutputHandler {
   sendToAgent: (message: string) => void;
 }
 
+// システムジョブ名
+const SYSTEM_ACTIVITY_TICK = "system:activity_tick";
+const SYSTEM_PROMOTION_TICK = "system:promotion_tick";
+
 /**
  * ライフサイクルコントローラー
  */
@@ -53,16 +58,12 @@ export class LifecycleController {
   private config: LifecycleConfig;
   private prisma: PrismaClient;
   private handler: OutputHandler;
+  private scheduler: Scheduler;
 
   // 外側の状態
   private inSleepWindow = false;
   private sleepPending = false;
-  private nextActivityTickAt: number | null = null;
   private activityWindowStartMs: number | null = null;
-
-  // タイマー
-  private promotionTimer: ReturnType<typeof setTimeout> | null = null;
-  private activityTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     prisma: PrismaClient,
@@ -73,6 +74,33 @@ export class LifecycleController {
     this.handler = handler;
     this.config = config;
     this.state = { mode: "OFF", focusChannelId: null };
+    this.scheduler = new Scheduler(prisma);
+
+    // スケジューラーハンドラーを登録
+    this.registerSchedulerHandlers();
+  }
+
+  /**
+   * スケジューラーハンドラーを登録
+   */
+  private registerSchedulerHandlers(): void {
+    // activity_tick ハンドラー
+    this.scheduler.registerHandler("activity_tick", async () => {
+      await this.handleActivityTick();
+    });
+
+    // promotion_tick ハンドラー
+    this.scheduler.registerHandler("promotion_tick", async () => {
+      await this.handlePromotionTick();
+    });
+
+    // reminder ハンドラー
+    this.scheduler.registerHandler("reminder", async (job) => {
+      if (job.payload.type === "reminder") {
+        const time = new Date().toLocaleTimeString("ja-JP");
+        this.handler.sendToAgent(`[Reminder] ${time} ${job.payload.content}`);
+      }
+    });
   }
 
   /**
@@ -110,11 +138,77 @@ export class LifecycleController {
       }
     }
 
-    // 確率昇格のスケジュール
-    this.schedulePromotionIfNeeded();
+    // スケジューラーを初期化（DBからジョブを復元）
+    await this.scheduler.initialize();
+
+    // システムジョブの存在確認・作成
+    await this.ensureSystemJobs();
+
+    // 状態に応じてシステムジョブを有効/無効化
+    await this.updateSystemJobStates();
 
     // 状態を保存
     await this.saveState();
+  }
+
+  /**
+   * システムジョブの存在確認・作成
+   */
+  private async ensureSystemJobs(): Promise<void> {
+    // activity_tick ジョブ
+    if (!this.scheduler.findJobByName(SYSTEM_ACTIVITY_TICK)) {
+      await this.scheduler.addJob({
+        name: SYSTEM_ACTIVITY_TICK,
+        schedule: {
+          type: "interval",
+          intervalMs: this.config.activityTickIntervalMs,
+        },
+        payload: { type: "activity_tick" },
+        enabled: false, // 状態に応じて有効化
+      });
+    }
+
+    // promotion_tick ジョブ
+    if (!this.scheduler.findJobByName(SYSTEM_PROMOTION_TICK)) {
+      await this.scheduler.addJob({
+        name: SYSTEM_PROMOTION_TICK,
+        schedule: {
+          type: "exponential",
+          meanIntervalMs: this.config.promotionMeanIntervalMs,
+        },
+        payload: { type: "promotion_tick" },
+        enabled: false, // 状態に応じて有効化
+      });
+    }
+  }
+
+  /**
+   * 状態に応じてシステムジョブを有効/無効化
+   */
+  private async updateSystemJobStates(): Promise<void> {
+    const isWatching = this.state.mode === "AWAKE_WATCHING";
+    const isNotWatching = this.state.mode === "AWAKE_NOT_WATCHING";
+
+    // activity_tick: WATCHING 時のみ有効
+    const activityJob = this.scheduler.findJobByName(SYSTEM_ACTIVITY_TICK);
+    if (activityJob) {
+      const shouldEnable = isWatching;
+      if (activityJob.enabled !== shouldEnable) {
+        await this.scheduler.setJobEnabled(activityJob.id, shouldEnable);
+        if (shouldEnable) {
+          this.activityWindowStartMs = Date.now();
+        }
+      }
+    }
+
+    // promotion_tick: NOT_WATCHING かつ非睡眠時間帯のみ有効
+    const promotionJob = this.scheduler.findJobByName(SYSTEM_PROMOTION_TICK);
+    if (promotionJob) {
+      const shouldEnable = isNotWatching && !this.inSleepWindow;
+      if (promotionJob.enabled !== shouldEnable) {
+        await this.scheduler.setJobEnabled(promotionJob.id, shouldEnable);
+      }
+    }
   }
 
   /**
@@ -127,12 +221,9 @@ export class LifecycleController {
     guildId: string,
     isMentionOrReplyToAgent: boolean,
   ): Promise<void> {
-    const now = Date.now();
     const chId = toChannelId(channelId);
 
     // reducerにイベントを送信
-    // 注意: 未読判定には状態遷移後の focusChannelId が必要なので、
-    // 先に dispatch してから判定を行う
     const event: LifeEvent = {
       type: "DISCORD_MESSAGE",
       channelId: chId,
@@ -159,12 +250,17 @@ export class LifecycleController {
       );
     }
 
-    // WATCHING開始時に未読サマリーを送る（確率昇格時と同様）
+    // WATCHING開始時に未読サマリーを送る（メンション/リプライで起こされた時）
     if (
       prevMode !== "AWAKE_WATCHING" &&
       this.state.mode === "AWAKE_WATCHING" &&
       isMentionOrReplyToAgent
     ) {
+      const time = new Date().toLocaleTimeString("ja-JP");
+      this.handler.sendToAgent(
+        `[Lifecycle] ${time} AWAKE_WATCHING に遷移しました。(focus: ${chId})`,
+      );
+
       const summaries = await getUnreadSummary(this.prisma);
       const summary = formatUnreadSummary(summaries);
       if (summary) {
@@ -177,9 +273,9 @@ export class LifecycleController {
       await markAsRead(this.prisma, chId, messageId as MessageId);
     }
 
-    // 5分集計のタイマー開始
-    if (this.state.mode === "AWAKE_WATCHING") {
-      this.scheduleActivityTickIfNeeded(now);
+    // 状態遷移があった場合はシステムジョブを更新
+    if (prevMode !== this.state.mode) {
+      await this.updateSystemJobStates();
     }
 
     // WATCHING終了後に睡眠保留の処理
@@ -192,10 +288,14 @@ export class LifecycleController {
    * AIツールから SET_NOT_WATCHING を受けた時
    */
   async setNotWatching(): Promise<void> {
+    const prevMode = this.state.mode;
     this.dispatch({ type: "SET_NOT_WATCHING" });
     this.handleSleepPendingIfNeeded();
     await this.saveState();
-    this.schedulePromotionIfNeeded();
+
+    if (prevMode !== this.state.mode) {
+      await this.updateSystemJobStates();
+    }
   }
 
   /**
@@ -231,17 +331,66 @@ export class LifecycleController {
   }
 
   /**
+   * スケジューラーを取得（テスト用）
+   */
+  getScheduler(): Scheduler {
+    return this.scheduler;
+  }
+
+  // ============================================================
+  // リマインダー API
+  // ============================================================
+
+  /**
+   * リマインダーを作成
+   */
+  async createReminder(
+    content: string,
+    schedule:
+      | { type: "once"; executeAt: Date }
+      | { type: "cron"; cronExpression: string },
+  ): Promise<ScheduledJob> {
+    // 過去時刻チェック（once の場合）
+    if (
+      schedule.type === "once" &&
+      isPastTime(schedule.executeAt, new Date())
+    ) {
+      throw new Error("過去の時刻にはリマインダーを設定できません");
+    }
+
+    return this.scheduler.addJob({
+      name: `reminder:${Date.now()}`,
+      schedule: schedule as Schedule,
+      payload: { type: "reminder", content },
+      enabled: true,
+    });
+  }
+
+  /**
+   * リマインダー一覧を取得
+   */
+  listReminders(): ScheduledJob[] {
+    return this.scheduler
+      .listJobs()
+      .filter((job) => job.payload.type === "reminder");
+  }
+
+  /**
+   * リマインダーを削除
+   */
+  async deleteReminder(jobId: string): Promise<boolean> {
+    const job = this.scheduler.listJobs().find((j) => j.id === jobId);
+    if (!job || job.payload.type !== "reminder") {
+      return false;
+    }
+    return this.scheduler.removeJob(jobId);
+  }
+
+  /**
    * クリーンアップ
    */
   cleanup(): void {
-    if (this.promotionTimer) {
-      clearTimeout(this.promotionTimer);
-      this.promotionTimer = null;
-    }
-    if (this.activityTimer) {
-      clearTimeout(this.activityTimer);
-      this.activityTimer = null;
-    }
+    this.scheduler.cleanup();
   }
 
   // ============================================================
@@ -307,26 +456,6 @@ export class LifecycleController {
     }
   }
 
-  private schedulePromotionIfNeeded(): void {
-    // 既存のタイマーをクリア
-    if (this.promotionTimer) {
-      clearTimeout(this.promotionTimer);
-      this.promotionTimer = null;
-    }
-
-    // 睡眠時間帯または NOT_WATCHING 以外はスケジュールしない
-    if (this.inSleepWindow || this.state.mode !== "AWAKE_NOT_WATCHING") {
-      return;
-    }
-
-    // 指数分布でサンプリング
-    const delayMs = sampleExponential(this.config.promotionMeanIntervalMs);
-
-    this.promotionTimer = setTimeout(() => {
-      this.handlePromotionTick();
-    }, delayMs);
-  }
-
   private async handlePromotionTick(): Promise<void> {
     if (this.state.mode !== "AWAKE_NOT_WATCHING") {
       return;
@@ -345,36 +474,22 @@ export class LifecycleController {
       focusChannelId,
     });
 
+    // 昇格通知を送信
+    const time = new Date().toLocaleTimeString("ja-JP");
+    this.handler.sendToAgent(
+      `[Lifecycle] ${time} AWAKE_WATCHING に昇格しました。行動を開始してください。(focus: ${focusChannelId})`,
+    );
+
     // 未読サマリーを送信（未読がある場合のみ）
     const summary = formatUnreadSummary(summaries);
     if (summary) {
       this.handler.sendToAgent(summary);
     }
 
+    // システムジョブの状態を更新（activity_tick を有効化）
+    await this.updateSystemJobStates();
+
     await this.saveState();
-  }
-
-  private scheduleActivityTickIfNeeded(nowMs: number): void {
-    if (this.state.mode !== "AWAKE_WATCHING") {
-      this.activityWindowStartMs = null;
-      this.nextActivityTickAt = null;
-      if (this.activityTimer) {
-        clearTimeout(this.activityTimer);
-        this.activityTimer = null;
-      }
-      return;
-    }
-
-    if (this.nextActivityTickAt !== null) {
-      return; // 既にスケジュール済み
-    }
-
-    this.activityWindowStartMs = nowMs;
-    this.nextActivityTickAt = nowMs + this.config.activityTickIntervalMs;
-
-    this.activityTimer = setTimeout(() => {
-      this.handleActivityTick();
-    }, this.config.activityTickIntervalMs);
   }
 
   private async handleActivityTick(): Promise<void> {
@@ -385,8 +500,8 @@ export class LifecycleController {
     const nowMs = Date.now();
     const durationMinutes =
       (nowMs - (this.activityWindowStartMs ?? nowMs)) / 1000 / 60;
+
     // 少なくとも5分間、あるいはウィンドウ開始からの未読を取得
-    // 念の為少し余裕を持たせる（5分 -> 6分とか）
     const summary = await getRecentUnreadMessages(
       this.prisma,
       Math.max(5, Math.ceil(durationMinutes)),
@@ -399,12 +514,7 @@ export class LifecycleController {
       summary,
     });
 
-    // 次のウィンドウ
+    // 次のウィンドウ開始
     this.activityWindowStartMs = nowMs;
-    this.nextActivityTickAt = nowMs + this.config.activityTickIntervalMs;
-
-    this.activityTimer = setTimeout(() => {
-      this.handleActivityTick();
-    }, this.config.activityTickIntervalMs);
   }
 }
