@@ -28,6 +28,9 @@ const commands = [
   new SlashCommandBuilder()
     .setName("config")
     .setDescription("Botの設定を表示します"),
+  new SlashCommandBuilder()
+    .setName("reminders")
+    .setDescription("登録されているリマインダーの一覧を表示します"),
 ];
 
 /**
@@ -74,6 +77,9 @@ export async function handleSlashCommand(
       break;
     case "config":
       await handleConfigCommand(interaction);
+      break;
+    case "reminders":
+      await handleRemindersCommand(interaction);
       break;
     default:
       await interaction.reply({
@@ -176,6 +182,57 @@ async function handleConfigCommand(
     `**確率昇格間隔**: 平均${promotionHours}時間`,
     `**アクティビティ集計**: ${activityMinutes}分ごと`,
   ];
+
+  await interaction.reply({
+    content: lines.join("\n"),
+    flags: 64,
+  });
+}
+
+async function handleRemindersCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const controller = getLifecycleController();
+
+  if (!controller) {
+    await interaction.reply({
+      content: "⚠️ ライフサイクルコントローラーが初期化されていません",
+      flags: 64,
+    });
+    return;
+  }
+
+  const reminders = controller.listReminders();
+
+  if (reminders.length === 0) {
+    await interaction.reply({
+      content: "✅ 登録されているリマインダーはありません",
+      flags: 64,
+    });
+    return;
+  }
+
+  const lines = [`## リマインダー一覧`, ``];
+
+  for (let i = 0; i < reminders.length; i++) {
+    const job = reminders[i];
+    const content =
+      job.payload.type === "reminder" ? job.payload.content : "(不明)";
+    const nextRun = job.nextRunAt
+      ? job.nextRunAt.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+      : "未定";
+
+    lines.push(`${i + 1}. **${content}**`);
+    lines.push(`   次回: ${nextRun}`);
+
+    if (job.schedule.type === "once") {
+      lines.push(`   タイプ: once`);
+    } else if (job.schedule.type === "cron") {
+      lines.push(`   タイプ: cron (\`${job.schedule.cronExpression}\`)`);
+    }
+
+    lines.push(``);
+  }
 
   await interaction.reply({
     content: lines.join("\n"),
