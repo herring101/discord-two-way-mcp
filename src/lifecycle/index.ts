@@ -2,6 +2,8 @@
  * lifecycle モジュールのエクスポート
  */
 
+// スケジューラー関連の再エクスポート
+export type { Schedule, ScheduledJob } from "../scheduler/index.js";
 export {
   defaultConfig,
   isInSleepWindow,

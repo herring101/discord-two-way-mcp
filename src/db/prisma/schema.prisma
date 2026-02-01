@@ -109,3 +109,24 @@ model UnreadMessage {
   @@index([channelId])
   @@index([createdAt])
 }
+
+// ============================================================
+// 汎用スケジューラー
+// ============================================================
+
+model ScheduledJob {
+  id           String    @id @default(uuid())
+  name         String    // ジョブ名（system:activity_tick, reminder:xxx など）
+  scheduleType String    // "once" | "interval" | "cron" | "exponential"
+  scheduleData String    // JSON: スケジュール設定
+  payloadType  String    // "reminder" | "activity_tick" | "promotion_tick"
+  payloadData  String    // JSON: ペイロードデータ
+  enabled      Boolean   @default(true)
+  lastRunAt    DateTime?
+  nextRunAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([enabled, nextRunAt])
+  @@index([payloadType])
+}
