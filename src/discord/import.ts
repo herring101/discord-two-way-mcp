@@ -48,6 +48,7 @@ function isTextBasedChannel(channel: unknown): boolean {
   return (
     ch.type === ChannelType.GuildText ||
     ch.type === ChannelType.GuildAnnouncement ||
+    ch.type === ChannelType.GuildVoice ||
     ch.type === ChannelType.PublicThread ||
     ch.type === ChannelType.PrivateThread ||
     ch.type === ChannelType.AnnouncementThread
