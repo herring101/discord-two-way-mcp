@@ -7,9 +7,15 @@ import {
   NewsChannel,
   TextChannel,
   ThreadChannel,
+  VoiceChannel,
 } from "discord.js";
 
-type SendableChannel = TextChannel | ThreadChannel | NewsChannel | DMChannel;
+type SendableChannel =
+  | TextChannel
+  | ThreadChannel
+  | NewsChannel
+  | DMChannel
+  | VoiceChannel;
 
 export interface MessageData {
   id: string;
@@ -58,7 +64,8 @@ export async function fetchTextBasedChannel(
     channel instanceof TextChannel ||
     channel instanceof ThreadChannel ||
     channel instanceof NewsChannel ||
-    channel instanceof DMChannel
+    channel instanceof DMChannel ||
+    channel instanceof VoiceChannel
   ) {
     return channel;
   }
@@ -104,13 +111,19 @@ export function filterTextChannels(channels: {
     .filter(
       (channel) =>
         channel.type === ChannelType.GuildText ||
+        channel.type === ChannelType.GuildVoice ||
         channel.type === ChannelType.PublicThread ||
         channel.type === ChannelType.PrivateThread,
     )
     .map((channel) => ({
       id: channel.id,
       name: channel.name,
-      type: channel.type === ChannelType.GuildText ? "text" : "thread",
+      type:
+        channel.type === ChannelType.GuildText
+          ? "text"
+          : channel.type === ChannelType.GuildVoice
+            ? "voice"
+            : "thread",
       position: channel.position || 0,
     }))
     .sort((a, b) => a.position - b.position);
