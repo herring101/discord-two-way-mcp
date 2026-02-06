@@ -112,6 +112,7 @@ defineTool(
         include: {
           attachments: true,
           channel: true,
+          reactions: true,
         },
       });
 
@@ -129,6 +130,10 @@ defineTool(
         timestamp: msg.timestamp,
         attachments: msg.attachments.map((att) => ({
           filename: att.filename,
+        })),
+        reactions: msg.reactions.map((r) => ({
+          emoji: r.emoji,
+          count: r.count,
         })),
       }));
 
