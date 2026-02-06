@@ -26,6 +26,10 @@ export interface FormattableMessage {
     messageId: string;
     content: string; // リプライ先の内容（截あり）
   };
+  reactions?: Array<{
+    emoji: string; // 絵文字（Unicodeまたはカスタム絵文字名）
+    count: number; // リアクション数
+  }>;
 }
 
 /**
@@ -99,6 +103,13 @@ export function formatMessage(msg: FormattableMessage): string {
     });
     const attachmentSection = `===添付ファイル===\n${attachmentTexts.join("\n")}`;
     content = content ? `${content}\n${attachmentSection}` : attachmentSection;
+  }
+
+  // リアクション情報
+  if (msg.reactions && msg.reactions.length > 0) {
+    const reactionTexts = msg.reactions.map((r) => `[${r.emoji} ${r.count}]`);
+    const reactionLine = reactionTexts.join(" ");
+    content = content ? `${content}\n${reactionLine}` : reactionLine;
   }
 
   return `${header}\n${content}`;
