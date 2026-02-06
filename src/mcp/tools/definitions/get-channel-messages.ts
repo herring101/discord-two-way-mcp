@@ -84,6 +84,12 @@ defineTool(
           attachments: msg.attachments.map((att) => ({
             filename: att.name ?? "unknown",
           })),
+          reactions: [...msg.reactions.cache.values()]
+            .filter((r) => r.count > 0)
+            .map((r) => ({
+              emoji: r.emoji.name ?? r.emoji.toString(),
+              count: r.count,
+            })),
         }),
       );
 
