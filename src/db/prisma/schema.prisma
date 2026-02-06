@@ -48,6 +48,7 @@ model Message {
   content        String
   timestamp      DateTime // Discord message timestamp
   attachments    Attachment[]
+  reactions      Reaction[]
   embeds         String // Store embeds as JSON string (SQLite doesn't support Json[])
   hasLink        Boolean      @default(false)
   hasAttachment  Boolean      @default(false)
@@ -72,6 +73,17 @@ model Attachment {
 
   @@index([messageId])
   @@index([url])
+}
+
+model Reaction {
+  id        String  @id @default(uuid())
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  emoji     String  // Unicode絵文字またはカスタム絵文字名
+  count     Int
+
+  @@unique([messageId, emoji])
+  @@index([messageId])
 }
 
 // ============================================================

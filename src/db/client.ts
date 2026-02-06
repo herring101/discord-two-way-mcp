@@ -216,6 +216,22 @@ export async function saveMessage(message: Message): Promise<void> {
       },
     });
   }
+
+  // リアクションを保存
+  for (const reaction of message.reactions.cache.values()) {
+    if (reaction.count > 0) {
+      const emoji = reaction.emoji.name ?? reaction.emoji.toString();
+      await db.reaction.upsert({
+        where: { messageId_emoji: { messageId: message.id, emoji } },
+        update: { count: reaction.count },
+        create: {
+          messageId: message.id,
+          emoji,
+          count: reaction.count,
+        },
+      });
+    }
+  }
 }
 
 /**
