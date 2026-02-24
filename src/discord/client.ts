@@ -145,7 +145,7 @@ export class DiscordClient {
         windowEndMs: number,
         summary: UnreadSummaryWithDetails[],
       ) => {
-        if (!this.tmuxSession) return;
+        if (!this.tmuxSession && !this.refreshTmuxSession()) return;
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
 
         if (summary.length === 0) {
@@ -177,7 +177,7 @@ export class DiscordClient {
         sendToTmux(this.tmuxSession, message);
       },
       sendToAgent: (message: string) => {
-        if (!this.tmuxSession) return;
+        if (!this.tmuxSession && !this.refreshTmuxSession()) return;
         sendToTmux(this.tmuxSession, message);
       },
     };
@@ -249,6 +249,17 @@ export class DiscordClient {
     }
   }
 
+  private refreshTmuxSession(): boolean {
+    const session = getTmuxSession();
+    if (session) {
+      this.tmuxSession = session;
+      logger.info(`tmux session re-detected: ${session}`);
+      return true;
+    }
+    logger.warn("tmuxセッションの再検出に失敗しました");
+    return false;
+  }
+
   private checkMentionOrReply(message: Message): boolean {
     const botUser = this.client.user;
     if (!botUser) return false;
@@ -270,7 +281,7 @@ export class DiscordClient {
   }
 
   private async notifyTmux(message: Message): Promise<void> {
-    if (!this.tmuxSession) return;
+    if (!this.tmuxSession && !this.refreshTmuxSession()) return;
 
     // チャンネル名を取得
     const channelName =
@@ -331,6 +342,24 @@ export class DiscordClient {
       content: message.content,
       timestamp: message.createdAt,
       attachments: parsedAttachments,
+      embeds: message.embeds.map((embed) => ({
+        title: embed.title,
+        description: embed.description,
+        url: embed.url,
+        color: embed.color,
+        author: embed.author
+          ? { name: embed.author.name, url: embed.author.url }
+          : null,
+        footer: embed.footer ? { text: embed.footer.text } : null,
+        fields: embed.fields.map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: f.inline,
+        })),
+        image: embed.image ? { url: embed.image.url } : null,
+        thumbnail: embed.thumbnail ? { url: embed.thumbnail.url } : null,
+        timestamp: embed.timestamp,
+      })),
       replyTo,
     };
 

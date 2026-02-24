@@ -56,7 +56,9 @@ main() {
   new_session=$(get_next_session_name)
   
   # 一意な一時ファイルを作成してセッション名を書き込む
-  SESSION_FILE=$(mktemp /tmp/discord-mcp-session.XXXXXX)
+  STATE_DIR="${HOME}/.local/state/discord-mcp"
+  mkdir -p "$STATE_DIR"
+  SESSION_FILE=$(mktemp "${STATE_DIR}/session.XXXXXX")
   echo "$new_session" > "$SESSION_FILE"
   
   # 終了時に一時ファイルを削除
