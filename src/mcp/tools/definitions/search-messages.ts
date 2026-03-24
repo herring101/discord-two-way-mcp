@@ -2,6 +2,7 @@ import type { Client } from "discord.js";
 import { getPrismaClient } from "../../../db/client.js";
 import { wrapError } from "../../../discord/helpers.js";
 import {
+  type FormattableEmbed,
   type FormattableMessage,
   formatMessages,
 } from "../../../shared/format.js";
@@ -117,25 +118,81 @@ defineTool(
       });
 
       // FormattableMessage に変換
-      const formattableMessages: FormattableMessage[] = messages.map((msg) => ({
-        id: msg.id,
-        channelId: msg.channelId,
-        channelName: msg.channel.name,
-        author: {
-          id: msg.authorId,
-          username: msg.authorUsername,
-          displayName: msg.authorDisplayName ?? msg.authorUsername,
-        },
-        content: msg.content,
-        timestamp: msg.timestamp,
-        attachments: msg.attachments.map((att) => ({
-          filename: att.filename,
-        })),
-        reactions: msg.reactions.map((r) => ({
-          emoji: r.emoji,
-          count: r.count,
-        })),
-      }));
+      const formattableMessages: FormattableMessage[] = messages.map((msg) => {
+        // DBに保存されたJSON文字列からembedsをパース
+        let embeds: FormattableEmbed[] = [];
+        if (msg.embeds) {
+          try {
+            const parsed = JSON.parse(msg.embeds);
+            if (Array.isArray(parsed)) {
+              embeds = parsed.map((e: Record<string, unknown>) => ({
+                title: (e.title as string) ?? null,
+                description: (e.description as string) ?? null,
+                url: (e.url as string) ?? null,
+                color: (e.color as number) ?? null,
+                author: e.author
+                  ? {
+                      name: (e.author as Record<string, unknown>)
+                        .name as string,
+                      url:
+                        ((e.author as Record<string, unknown>).url as string) ??
+                        null,
+                    }
+                  : null,
+                footer: e.footer
+                  ? {
+                      text: (e.footer as Record<string, unknown>)
+                        .text as string,
+                    }
+                  : null,
+                fields: Array.isArray(e.fields)
+                  ? (e.fields as Array<Record<string, unknown>>).map((f) => ({
+                      name: (f.name as string) ?? "",
+                      value: (f.value as string) ?? "",
+                      inline: (f.inline as boolean) ?? false,
+                    }))
+                  : [],
+                image: e.image
+                  ? {
+                      url: (e.image as Record<string, unknown>).url as string,
+                    }
+                  : null,
+                thumbnail: e.thumbnail
+                  ? {
+                      url: (e.thumbnail as Record<string, unknown>)
+                        .url as string,
+                    }
+                  : null,
+                timestamp: (e.timestamp as string) ?? null,
+              }));
+            }
+          } catch {
+            // JSON parse失敗時は空配列のまま
+          }
+        }
+
+        return {
+          id: msg.id,
+          channelId: msg.channelId,
+          channelName: msg.channel.name,
+          author: {
+            id: msg.authorId,
+            username: msg.authorUsername,
+            displayName: msg.authorDisplayName ?? msg.authorUsername,
+          },
+          content: msg.content,
+          timestamp: msg.timestamp,
+          attachments: msg.attachments.map((att) => ({
+            filename: att.filename,
+            parsedContent: att.parsedContent ?? undefined,
+          })),
+          embeds,
+          reactions: msg.reactions.map((r) => ({
+            emoji: r.emoji,
+            count: r.count,
+          })),
+        };
+      });
 
       // oldestの場合は時系列順（古い→新しい）に並び替え
       const sortedMessages =

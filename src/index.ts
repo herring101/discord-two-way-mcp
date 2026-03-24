@@ -5,6 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { removePidFile } from "./db/client.js";
 import { DiscordClient } from "./discord/client.js";
 import { toolRegistry } from "./mcp/tools/index.js";
 import { getLogger } from "./shared/logger.js";
@@ -74,6 +75,11 @@ process.on("SIGTERM", async () => {
   logger.info("Received SIGTERM, shutting down...");
   await discordClient.disconnect();
   process.exit(0);
+});
+
+// Safety net: remove PID file on exit (synchronous, runs even on unexpected exit)
+process.on("exit", () => {
+  removePidFile();
 });
 
 // Start the server

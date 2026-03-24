@@ -428,20 +428,36 @@ export class LifecycleController {
   }
 
   private async saveState(): Promise<void> {
-    await this.prisma.agentState.upsert({
-      where: { id: "singleton" },
-      update: {
-        mode: this.state.mode,
-        focusChannelId: this.state.focusChannelId,
-        lastWakeAt: this.state.mode !== "OFF" ? new Date() : undefined,
-        lastSleepAt: this.state.mode === "OFF" ? new Date() : undefined,
-      },
-      create: {
-        id: "singleton",
-        mode: this.state.mode,
-        focusChannelId: this.state.focusChannelId,
-      },
-    });
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.prisma.agentState.upsert({
+          where: { id: "singleton" },
+          update: {
+            mode: this.state.mode,
+            focusChannelId: this.state.focusChannelId,
+            lastWakeAt: this.state.mode !== "OFF" ? new Date() : undefined,
+            lastSleepAt: this.state.mode === "OFF" ? new Date() : undefined,
+          },
+          create: {
+            id: "singleton",
+            mode: this.state.mode,
+            focusChannelId: this.state.focusChannelId,
+          },
+        });
+        return;
+      } catch (error) {
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        } else {
+          // saveStateの失敗はメッセージ送信をブロックしない
+          console.warn(
+            "[LifecycleController] saveState failed after retries (non-fatal):",
+            error,
+          );
+        }
+      }
+    }
   }
 
   private handleSleepPendingIfNeeded(): void {

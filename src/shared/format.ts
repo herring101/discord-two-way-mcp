@@ -6,6 +6,31 @@
 /**
  * フォーマット可能なメッセージの型
  */
+/**
+ * Embed内のフィールド
+ */
+export interface FormattableEmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+/**
+ * フォーマット可能なEmbed
+ */
+export interface FormattableEmbed {
+  title?: string | null;
+  description?: string | null;
+  url?: string | null;
+  color?: number | null;
+  author?: { name: string; url?: string | null } | null;
+  footer?: { text: string } | null;
+  fields?: FormattableEmbedField[];
+  image?: { url: string } | null;
+  thumbnail?: { url: string } | null;
+  timestamp?: string | null;
+}
+
 export interface FormattableMessage {
   id: string;
   channelId: string;
@@ -22,6 +47,7 @@ export interface FormattableMessage {
     parsedContent?: string; // 解析成功時の内容
     parseError?: string; // 解析エラー時のメッセージ
   }>;
+  embeds?: FormattableEmbed[];
   replyTo?: {
     messageId: string;
     content: string; // リプライ先の内容（截あり）
@@ -64,6 +90,52 @@ function formatTime(date: Date): string {
 }
 
 /**
+ * 単一のEmbedをプレーンテキストにフォーマット
+ */
+function formatEmbed(embed: FormattableEmbed): string {
+  const parts: string[] = [];
+
+  if (embed.author?.name) {
+    parts.push(
+      `著者: ${embed.author.name}${embed.author.url ? ` (${embed.author.url})` : ""}`,
+    );
+  }
+
+  if (embed.title) {
+    const titleLine = embed.url ? `${embed.title} (${embed.url})` : embed.title;
+    parts.push(titleLine);
+  }
+
+  if (embed.description) {
+    parts.push(embed.description);
+  }
+
+  if (embed.fields && embed.fields.length > 0) {
+    for (const field of embed.fields) {
+      parts.push(`${field.name}: ${field.value}`);
+    }
+  }
+
+  if (embed.image?.url) {
+    parts.push(`[画像: ${embed.image.url}]`);
+  }
+
+  if (embed.thumbnail?.url) {
+    parts.push(`[サムネイル: ${embed.thumbnail.url}]`);
+  }
+
+  if (embed.footer?.text) {
+    parts.push(`— ${embed.footer.text}`);
+  }
+
+  if (embed.timestamp) {
+    parts.push(`時刻: ${embed.timestamp}`);
+  }
+
+  return parts.join("\n");
+}
+
+/**
  * 単一メッセージをフォーマット
  *
  * 形式:
@@ -103,6 +175,23 @@ export function formatMessage(msg: FormattableMessage): string {
     });
     const attachmentSection = `===添付ファイル===\n${attachmentTexts.join("\n")}`;
     content = content ? `${content}\n${attachmentSection}` : attachmentSection;
+  }
+
+  // Embed情報
+  if (msg.embeds && msg.embeds.length > 0) {
+    // 空でないembedのみフォーマット
+    const embedTexts = msg.embeds
+      .map((e) => formatEmbed(e))
+      .filter((text) => text.length > 0);
+    if (embedTexts.length > 0) {
+      const embedSection =
+        embedTexts.length === 1
+          ? `===Embed===\n${embedTexts[0]}`
+          : embedTexts
+              .map((text, i) => `===Embed ${i + 1}===\n${text}`)
+              .join("\n");
+      content = content ? `${content}\n${embedSection}` : embedSection;
+    }
   }
 
   // リアクション情報

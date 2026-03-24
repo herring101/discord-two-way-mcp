@@ -1,5 +1,11 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import type { Channel, Guild, Message } from "discord.js";
@@ -13,6 +19,146 @@ let currentBotId: string | null = null;
 
 const DATA_DIR = join(import.meta.dirname, "../../data/db");
 const SCHEMA_PATH = join(import.meta.dirname, "./prisma/schema.prisma");
+
+/**
+ * PIDファイルのパスを取得
+ */
+function getPidFilePath(botId: string): string {
+  return join(DATA_DIR, `bot_${botId}.pid`);
+}
+
+/**
+ * プロセスが終了するまで待機する
+ * @returns true: プロセスが終了した, false: タイムアウト
+ */
+function waitForProcessExit(pid: number, timeoutMs: number): boolean {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true; // プロセスが存在しない = 終了済み
+    }
+    execSync("sleep 0.1", { stdio: "ignore" });
+  }
+  return false;
+}
+
+/**
+ * 古いプロセスが動いていたら kill する
+ * PIDファイルを読み取り、該当プロセスがまだ生きていれば SIGTERM → SIGKILL で終了させる
+ */
+function killOldProcess(botId: string): void {
+  const pidFile = getPidFilePath(botId);
+  if (!existsSync(pidFile)) {
+    return;
+  }
+
+  try {
+    const content = readFileSync(pidFile, "utf-8");
+    const oldPid = Number.parseInt(content.trim(), 10);
+
+    if (Number.isNaN(oldPid) || oldPid <= 0) {
+      logger.warn(
+        `Invalid PID in ${pidFile}: "${content.trim()}", removing stale PID file`,
+      );
+      unlinkSync(pidFile);
+      return;
+    }
+
+    // 自分自身のPIDなら何もしない（再初期化のケース）
+    if (oldPid === process.pid) {
+      return;
+    }
+
+    // プロセスが生きているかチェック (signal 0 はプロセスの存在確認)
+    try {
+      process.kill(oldPid, 0);
+    } catch {
+      // プロセスが存在しない → stale PID file
+      logger.info(
+        `Old process ${oldPid} for bot ${botId} is no longer running, removing stale PID file`,
+      );
+      unlinkSync(pidFile);
+      return;
+    }
+
+    // プロセスがまだ生きている → SIGTERM で終了を試みる
+    logger.info(`Killing old process ${oldPid} for bot ${botId}...`);
+    try {
+      process.kill(oldPid, "SIGTERM");
+    } catch (e) {
+      logger.warn(`Failed to send SIGTERM to ${oldPid}:`, e);
+    }
+
+    // SIGTERM 後、最大5秒待機
+    if (!waitForProcessExit(oldPid, 5000)) {
+      // 終了しなければ SIGKILL で強制終了
+      logger.warn(
+        `Process ${oldPid} did not exit after SIGTERM, sending SIGKILL...`,
+      );
+      try {
+        process.kill(oldPid, "SIGKILL");
+      } catch {
+        // ignore - プロセスが既に終了している可能性
+      }
+
+      // SIGKILL 後も確認（最大3秒）
+      if (!waitForProcessExit(oldPid, 3000)) {
+        logger.error(
+          `Process ${oldPid} did not exit even after SIGKILL, proceeding anyway`,
+        );
+      }
+    }
+
+    logger.info(`Old process ${oldPid} for bot ${botId} has been terminated`);
+  } catch (error) {
+    logger.warn(`Error handling old PID file for bot ${botId}:`, error);
+  }
+
+  // PIDファイルを削除（新しいPIDで上書きされるが念のため）
+  try {
+    if (existsSync(pidFile)) {
+      unlinkSync(pidFile);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 現在のプロセスのPIDをファイルに書き込む
+ */
+function writePidFile(botId: string): void {
+  const pidFile = getPidFilePath(botId);
+  try {
+    writeFileSync(pidFile, `${process.pid}`, "utf-8");
+    logger.info(`PID file written: ${pidFile} (PID: ${process.pid})`);
+  } catch (error) {
+    logger.warn(`Failed to write PID file ${pidFile}:`, error);
+  }
+}
+
+/**
+ * PIDファイルを削除する（シャットダウン時に呼ぶ）
+ */
+export function removePidFile(): void {
+  if (!currentBotId) return;
+  const pidFile = getPidFilePath(currentBotId);
+  try {
+    if (existsSync(pidFile)) {
+      // 自分のPIDと一致する場合のみ削除（他のインスタンスが書き換えた場合を考慮）
+      const content = readFileSync(pidFile, "utf-8");
+      const storedPid = Number.parseInt(content.trim(), 10);
+      if (storedPid === process.pid) {
+        unlinkSync(pidFile);
+        logger.info(`PID file removed: ${pidFile}`);
+      }
+    }
+  } catch {
+    // シャットダウン中のエラーは無視
+  }
+}
 
 /**
  * DBファイルのパスを取得
@@ -50,6 +196,12 @@ export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
+  // 古いプロセスが存在すれば kill する（SQLite ロック競合を防止）
+  killOldProcess(botId);
+
+  // 現在のプロセスの PID を書き込む
+  writePidFile(botId);
+
   // 新規DBかどうかを判定
   const dbFilePath = getDbFilePath(botId);
   const isNewDatabase = !existsSync(dbFilePath);
@@ -78,12 +230,33 @@ export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
     throw error;
   }
 
+  // WALモードを設定（永続化されるためCLIで一度設定すれば十分）
+  try {
+    execSync(`sqlite3 "${dbFilePath}" "PRAGMA journal_mode=WAL;"`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    logger.info("SQLite pragma set via CLI: journal_mode=WAL");
+  } catch (error) {
+    logger.warn("Failed to set SQLite WAL mode via CLI (non-fatal):", error);
+  }
+
   // Prisma 7: libsql アダプターファクトリーを使用（Bun 対応）
+  // concurrency: 1 でSQLiteシングルライターに合わせる
   const adapter = new PrismaLibSql({
     url: databaseUrl,
+    concurrency: 1,
   });
 
   prisma = new PrismaClient({ adapter });
+
+  // busy_timeout はコネクション単位の設定のため、Prisma経由で設定
+  try {
+    await prisma.$executeRawUnsafe("PRAGMA busy_timeout = 5000");
+    logger.info("SQLite busy_timeout set to 5000ms via Prisma");
+  } catch (error) {
+    logger.warn("Failed to set busy_timeout via Prisma (non-fatal):", error);
+  }
 
   logger.info(`Database initialized: ${dbFilePath}`);
 
@@ -110,8 +283,10 @@ export async function disconnectDatabase(): Promise<void> {
   if (prisma) {
     await prisma.$disconnect();
     prisma = null;
-    currentBotId = null;
   }
+  // PIDファイルを削除してからcurrentBotIdをクリア
+  removePidFile();
+  currentBotId = null;
 }
 
 /**
@@ -231,6 +406,29 @@ export async function saveMessage(message: Message): Promise<void> {
         },
       });
     }
+  }
+}
+
+/**
+ * 添付ファイルの解析結果をDBに保存
+ */
+export async function updateAttachmentParsedContent(
+  messageId: string,
+  filename: string,
+  parsedContent: string,
+): Promise<void> {
+  const db = getPrismaClient();
+  const attachmentId = `${messageId}_${filename}`;
+  try {
+    await db.attachment.update({
+      where: { id: attachmentId },
+      data: { parsedContent },
+    });
+  } catch (error) {
+    logger.error(
+      `Failed to update parsedContent for attachment ${attachmentId}:`,
+      error,
+    );
   }
 }
 

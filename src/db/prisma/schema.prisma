@@ -62,14 +62,15 @@ model Message {
 }
 
 model Attachment {
-  id          String   @id @default(uuid())
-  messageId   String
-  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  filename    String
-  url         String
-  size        Int?
-  contentType String?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid())
+  messageId     String
+  message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  filename      String
+  url           String
+  size          Int?
+  contentType   String?
+  parsedContent String?  // Gemini解析結果（画像の説明テキスト等）
+  createdAt     DateTime @default(now())
 
   @@index([messageId])
   @@index([url])

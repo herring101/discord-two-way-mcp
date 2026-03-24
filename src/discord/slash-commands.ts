@@ -82,10 +82,8 @@ export async function handleSlashCommand(
       await handleRemindersCommand(interaction);
       break;
     default:
-      await interaction.reply({
-        content: "不明なコマンドです",
-        flags: 64, // Ephemeral
-      });
+      // 知らないコマンドは無視（他のbot/daemonが処理する可能性がある）
+      return;
   }
 }
 

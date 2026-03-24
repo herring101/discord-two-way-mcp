@@ -11,6 +11,7 @@ import {
   getPrismaClient,
   initDatabase,
   saveMessage,
+  updateAttachmentParsedContent,
 } from "../db/client.js";
 import {
   type ChannelId,
@@ -225,17 +226,19 @@ export class DiscordClient {
         .then(async () => {
           // コントローラーの状態に応じて通知
           const state = this.controller?.getState();
-          if (state?.mode === "AWAKE_WATCHING") {
-            // focusChannel のメッセージ、またはメンション/リプライなら通知
-            if (
-              state.focusChannelId === message.channelId ||
-              isMentionOrReplyToAgent
-            ) {
-              await this.notifyTmux(message);
-            }
-          } else if (isMentionOrReplyToAgent) {
-            // WATCHING以外でもメンション/リプライは通知
-            await this.notifyTmux(message);
+          const shouldNotify =
+            (state?.mode === "AWAKE_WATCHING" &&
+              (state.focusChannelId === message.channelId ||
+                isMentionOrReplyToAgent)) ||
+            (state?.mode !== "AWAKE_WATCHING" && isMentionOrReplyToAgent);
+
+          if (shouldNotify) {
+            // tmux 通知対象のメッセージのみ添付ファイルを解析
+            const parsedAttachments =
+              message.attachments.size > 0
+                ? await this.parseAndSaveAttachments(message)
+                : undefined;
+            await this.notifyTmux(message, parsedAttachments);
           }
         })
         .catch((error) => {
@@ -243,7 +246,13 @@ export class DiscordClient {
         });
     } else {
       // コントローラーがない場合は従来通り全て通知
-      this.notifyTmux(message).catch((error) => {
+      (async () => {
+        const parsedAttachments =
+          message.attachments.size > 0
+            ? await this.parseAndSaveAttachments(message)
+            : undefined;
+        await this.notifyTmux(message, parsedAttachments);
+      })().catch((error) => {
         logger.error("Failed to notify tmux:", error);
       });
     }
@@ -264,9 +273,22 @@ export class DiscordClient {
     const botUser = this.client.user;
     if (!botUser) return false;
 
-    // メンションされているか
+    // ユーザーメンションされているか
     if (message.mentions.users.has(botUser.id)) {
       return true;
+    }
+
+    // ロールメンションされているか（Botの管理ロールを含む）
+    if (message.guild) {
+      const botMember = message.guild.members.me;
+      if (
+        botMember &&
+        message.mentions.roles.some((role) =>
+          botMember.roles.cache.has(role.id),
+        )
+      ) {
+        return true;
+      }
     }
 
     // リプライかどうか（リプライ先のauthorがBot）
@@ -280,7 +302,56 @@ export class DiscordClient {
     return false;
   }
 
-  private async notifyTmux(message: Message): Promise<void> {
+  /**
+   * 添付ファイルをGeminiで解析し、結果をDBに保存する
+   */
+  private async parseAndSaveAttachments(message: Message): Promise<
+    Array<{
+      filename: string;
+      parsedContent?: string;
+      parseError?: string;
+    }>
+  > {
+    const results = await Promise.all(
+      message.attachments.map(async (att) => {
+        const filename = att.name ?? "unknown";
+        const result = await parseAttachment(
+          att.url,
+          att.contentType,
+          filename,
+        );
+        const parsedContent = result.parsed ? result.content : undefined;
+        const parseError =
+          !result.parsed && result.error ? result.error : undefined;
+
+        // 解析成功時はDBに保存（非同期、エラーは無視）
+        if (parsedContent) {
+          updateAttachmentParsedContent(
+            message.id,
+            filename,
+            parsedContent,
+          ).catch((error) => {
+            logger.error(
+              `Failed to save parsedContent for ${filename}:`,
+              error,
+            );
+          });
+        }
+
+        return { filename, parsedContent, parseError };
+      }),
+    );
+    return results;
+  }
+
+  private async notifyTmux(
+    message: Message,
+    preParsedAttachments?: Array<{
+      filename: string;
+      parsedContent?: string;
+      parseError?: string;
+    }>,
+  ): Promise<void> {
     if (!this.tmuxSession && !this.refreshTmuxSession()) return;
 
     // チャンネル名を取得
@@ -291,21 +362,24 @@ export class DiscordClient {
           ? (message.channel.name as string)
           : null;
 
-    // 添付ファイルを並列解析
-    const parsedAttachments = await Promise.all(
-      message.attachments.map(async (att) => {
-        const result = await parseAttachment(
-          att.url,
-          att.contentType,
-          att.name ?? "unknown",
-        );
-        return {
-          filename: att.name ?? "unknown",
-          parsedContent: result.parsed ? result.content : undefined,
-          parseError: !result.parsed && result.error ? result.error : undefined,
-        };
-      }),
-    );
+    // 事前解析済みの結果があればそれを使い、なければ解析する
+    const parsedAttachments =
+      preParsedAttachments ??
+      (await Promise.all(
+        message.attachments.map(async (att) => {
+          const result = await parseAttachment(
+            att.url,
+            att.contentType,
+            att.name ?? "unknown",
+          );
+          return {
+            filename: att.name ?? "unknown",
+            parsedContent: result.parsed ? result.content : undefined,
+            parseError:
+              !result.parsed && result.error ? result.error : undefined,
+          };
+        }),
+      ));
 
     // リプライ先情報を取得
     let replyTo: { messageId: string; content: string } | undefined;
