@@ -91,6 +91,7 @@ function serializePayload(payload: JobPayload): {
       break;
     case "activity_tick":
     case "promotion_tick":
+    case "sleep_start":
       // データなし
       break;
   }
@@ -117,6 +118,8 @@ function deserializePayload(
       return { type: "activity_tick" };
     case "promotion_tick":
       return { type: "promotion_tick" };
+    case "sleep_start":
+      return { type: "sleep_start" };
     default:
       throw new Error(`Unknown payload type: ${payloadType}`);
   }

@@ -8,6 +8,7 @@ export {
   defaultConfig,
   isInSleepWindow,
   type LifecycleConfig,
+  timeStringToMinutes,
 } from "./config.js";
 export { LifecycleController, type OutputHandler } from "./controller.js";
 export { reduce } from "./reducer.js";

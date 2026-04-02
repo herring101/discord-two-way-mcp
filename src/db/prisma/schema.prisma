@@ -101,6 +101,16 @@ model AgentState {
   updatedAt      DateTime @updatedAt
 }
 
+model LifecycleConfig {
+  id                      String   @id @default("singleton")
+  sleepStartTime          String   // "HH:MM" format
+  sleepEndTime            String   // "HH:MM" format
+  promotionMeanIntervalMs Int
+  activityTickIntervalMs  Int
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
 model ChannelReadState {
   channelId         String   @id
   guildId           String

@@ -13,7 +13,9 @@ import "./definitions/list-reminders.js";
 import "./definitions/reply-to-message.js";
 import "./definitions/search-messages.js";
 import "./definitions/send-message.js";
+import "./definitions/update-lifecycle-config.js";
 import "./definitions/upload-file.js";
+import "./definitions/verify-memory-links.js";
 
 // レジストリをエクスポート
 export { toolRegistry } from "./registry.js";

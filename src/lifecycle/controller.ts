@@ -6,6 +6,7 @@
 import type { PrismaClient } from "../db/generated/prisma/client.js";
 import type { Schedule, ScheduledJob } from "../scheduler/index.js";
 import { isPastTime, Scheduler } from "../scheduler/index.js";
+import { getLogger } from "../shared/logger.js";
 import {
   defaultConfig,
   isInSleepWindow,
@@ -45,9 +46,12 @@ export interface OutputHandler {
   sendToAgent: (message: string) => void;
 }
 
+const logger = getLogger("lifecycle");
+
 // システムジョブ名
 const SYSTEM_ACTIVITY_TICK = "system:activity_tick";
 const SYSTEM_PROMOTION_TICK = "system:promotion_tick";
+const SYSTEM_SLEEP_START = "system:sleep_start";
 
 /**
  * ライフサイクルコントローラー
@@ -100,12 +104,20 @@ export class LifecycleController {
         this.handler.sendToAgent(`[Reminder] ${time} ${job.payload.content}`);
       }
     });
+
+    // sleep_start ハンドラー
+    this.scheduler.registerHandler("sleep_start", async () => {
+      await this.handleSleepStart();
+    });
   }
 
   /**
    * 初期化（起動時に呼び出す）
    */
   async initialize(now: Date = new Date()): Promise<void> {
+    // DBから設定を読み込み
+    await this.loadConfigFromDb();
+
     // DBから状態を復元
     const saved = await this.prisma.agentState.findUnique({
       where: { id: "singleton" },
@@ -177,6 +189,22 @@ export class LifecycleController {
         },
         payload: { type: "promotion_tick" },
         enabled: false, // 状態に応じて有効化
+      });
+    }
+
+    // sleep_start ジョブ（sleepStartTime に毎日発火）
+    if (!this.scheduler.findJobByName(SYSTEM_SLEEP_START)) {
+      const [hours, minutes] = this.config.sleepStartTime
+        .split(":")
+        .map(Number);
+      await this.scheduler.addJob({
+        name: SYSTEM_SLEEP_START,
+        schedule: {
+          type: "cron",
+          cronExpression: `${minutes} ${hours} * * *`,
+        },
+        payload: { type: "sleep_start" },
+        enabled: true,
       });
     }
   }
@@ -386,6 +414,56 @@ export class LifecycleController {
   }
 
   /**
+   * 現在の設定を取得
+   */
+  getConfig(): LifecycleConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * 設定を更新（DBに永続化し、システムジョブを再作成）
+   */
+  async updateConfig(
+    partial: Partial<LifecycleConfig>,
+  ): Promise<LifecycleConfig> {
+    const newConfig = { ...this.config, ...partial };
+    this.config = newConfig;
+
+    // DBに永続化
+    await this.prisma.lifecycleConfig.upsert({
+      where: { id: "singleton" },
+      update: {
+        sleepStartTime: newConfig.sleepStartTime,
+        sleepEndTime: newConfig.sleepEndTime,
+        promotionMeanIntervalMs: newConfig.promotionMeanIntervalMs,
+        activityTickIntervalMs: newConfig.activityTickIntervalMs,
+      },
+      create: {
+        id: "singleton",
+        sleepStartTime: newConfig.sleepStartTime,
+        sleepEndTime: newConfig.sleepEndTime,
+        promotionMeanIntervalMs: newConfig.promotionMeanIntervalMs,
+        activityTickIntervalMs: newConfig.activityTickIntervalMs,
+      },
+    });
+
+    // システムジョブを再作成
+    await this.recreateSystemJobs();
+
+    // 睡眠時間帯を再判定
+    this.inSleepWindow = isInSleepWindow(new Date(), this.config);
+
+    return { ...this.config };
+  }
+
+  /**
+   * エージェントにメッセージを送信
+   */
+  sendToAgent(message: string): void {
+    this.handler.sendToAgent(message);
+  }
+
+  /**
    * クリーンアップ
    */
   cleanup(): void {
@@ -468,6 +546,69 @@ export class LifecycleController {
     ) {
       this.dispatch({ type: "SLEEP" });
       this.sleepPending = false;
+    }
+  }
+
+  private async loadConfigFromDb(): Promise<void> {
+    const saved = await this.prisma.lifecycleConfig.findUnique({
+      where: { id: "singleton" },
+    });
+    if (saved) {
+      this.config = {
+        sleepStartTime: saved.sleepStartTime,
+        sleepEndTime: saved.sleepEndTime,
+        promotionMeanIntervalMs: saved.promotionMeanIntervalMs,
+        activityTickIntervalMs: saved.activityTickIntervalMs,
+      };
+      logger.info(
+        `[Lifecycle] Config loaded from DB: sleep=${saved.sleepStartTime}-${saved.sleepEndTime}`,
+      );
+    }
+  }
+
+  private async recreateSystemJobs(): Promise<void> {
+    for (const name of [
+      SYSTEM_ACTIVITY_TICK,
+      SYSTEM_PROMOTION_TICK,
+      SYSTEM_SLEEP_START,
+    ]) {
+      const job = this.scheduler.findJobByName(name);
+      if (job) {
+        await this.scheduler.removeJob(job.id);
+      }
+    }
+    await this.ensureSystemJobs();
+    await this.updateSystemJobStates();
+  }
+
+  private async handleSleepStart(): Promise<void> {
+    if (this.state.mode === "OFF") return;
+
+    const today = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "Asia/Tokyo",
+    }).format(new Date());
+
+    const sleepMessage =
+      `[Sleep] 睡眠時の記憶整理を行ってください。` +
+      ` 1. 日次ドキュメントの作成: docs/daily/${today}.md に今日の出来事を記述する` +
+      `（今日の出来事・会話の要点を詳細に記述、学んだこと・改善すべき点、` +
+      `今後も参照しそうな知識は docs/ 以下に独立したドキュメントとして作成し日次ドキュメントからリンクする）` +
+      ` 2. CLAUDE.md の見直し: 今日の経験を踏まえて行動ルールを改善すべき箇所があれば更新。` +
+      `「## 参照ドキュメント」セクションの番号付きリストを最重要なもの最大10件に維持` +
+      `（不要リンクは外し、新たに重要なものがあれば入れ替え。` +
+      `リストにないドキュメントは必要時に docs/ 内を検索して参照）` +
+      ` 3. verify_memory_links を実行し、問題があれば修正してから再実行する。`;
+
+    this.handler.sendToAgent(sleepMessage);
+
+    this.inSleepWindow = true;
+
+    if (this.state.mode === "AWAKE_NOT_WATCHING") {
+      this.dispatch({ type: "SLEEP" });
+      await this.updateSystemJobStates();
+      await this.saveState();
+    } else if (this.state.mode === "AWAKE_WATCHING") {
+      this.sleepPending = true;
     }
   }
 

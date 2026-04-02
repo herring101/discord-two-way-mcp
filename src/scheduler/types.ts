@@ -17,7 +17,8 @@ export type Schedule =
 export type JobPayload =
   | { type: "reminder"; content: string }
   | { type: "activity_tick" }
-  | { type: "promotion_tick" };
+  | { type: "promotion_tick" }
+  | { type: "sleep_start" };
 
 /**
  * スケジュールされたジョブ

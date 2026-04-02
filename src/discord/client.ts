@@ -49,6 +49,7 @@ export class DiscordClient {
   private lastNotifiedDate: Date | null = null;
   private botUserId: string | null = null;
   private controller: LifecycleController | null = null;
+  private lastWorkCheckMs = Date.now();
 
   constructor() {
     this.client = new Client({
@@ -150,6 +151,17 @@ export class DiscordClient {
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
 
         if (summary.length === 0) {
+          const now = Date.now();
+          const interval =
+            this.controller?.getConfig().promotionMeanIntervalMs ??
+            defaultConfig.promotionMeanIntervalMs;
+          if (now - this.lastWorkCheckMs >= interval) {
+            this.lastWorkCheckMs = now;
+            sendToTmux(
+              this.tmuxSession,
+              "[WorkCheck] CLAUDE.md に従って行動を開始してください。",
+            );
+          }
           return;
         }
 
