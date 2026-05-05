@@ -8,6 +8,7 @@ import {
   isTrustedUser,
   parseTrustedUserIdsFromEnv,
   resetTrustCache,
+  setBotUserId,
 } from "./trust.js";
 
 describe("parseTrustedUserIdsFromEnv", () => {
@@ -37,11 +38,13 @@ describe("isTrustedUser (env のみ、DB なし)", () => {
 
   beforeEach(() => {
     resetTrustCache();
+    setBotUserId(null);
   });
   afterEach(() => {
     if (original === undefined) delete process.env.INITIAL_TRUSTED_USER_IDS;
     else process.env.INITIAL_TRUSTED_USER_IDS = original;
     resetTrustCache();
+    setBotUserId(null);
   });
 
   test("env 未設定 → 任意 ID は false", async () => {
@@ -75,5 +78,24 @@ describe("isTrustedUser (env のみ、DB なし)", () => {
     resetTrustCache();
     expect(await isTrustedUser("222")).toBe(true);
     expect(await isTrustedUser("111")).toBe(false);
+  });
+
+  test("setBotUserId(id) → bot 自身は trusted、env と独立に効く", async () => {
+    delete process.env.INITIAL_TRUSTED_USER_IDS;
+    setBotUserId("bot-self");
+    expect(await isTrustedUser("bot-self")).toBe(true);
+    expect(await isTrustedUser("other")).toBe(false);
+  });
+
+  test("setBotUserId は cache を破棄して即時反映、null で解除", async () => {
+    setBotUserId("bot-A");
+    expect(await isTrustedUser("bot-A")).toBe(true);
+
+    setBotUserId("bot-B");
+    expect(await isTrustedUser("bot-A")).toBe(false);
+    expect(await isTrustedUser("bot-B")).toBe(true);
+
+    setBotUserId(null);
+    expect(await isTrustedUser("bot-B")).toBe(false);
   });
 });

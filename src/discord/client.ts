@@ -21,6 +21,7 @@ import {
   type OutputHandler,
   type UnreadSummaryWithDetails,
 } from "../lifecycle/index.js";
+import { setBotUserId } from "../security/trust.js";
 import { parseAttachment } from "../shared/attachment-parser.js";
 import {
   type FormattableMessage,
@@ -76,6 +77,7 @@ export class DiscordClient {
     this.client.once("clientReady", async () => {
       logger.info(`Discord bot logged in as ${this.client.user?.tag}`);
       this.botUserId = this.client.user?.id ?? null;
+      setBotUserId(this.botUserId);
 
       if (this.client.user) {
         try {
