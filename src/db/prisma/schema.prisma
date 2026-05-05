@@ -153,3 +153,51 @@ model ScheduledJob {
   @@index([enabled, nextRunAt])
   @@index([payloadType])
 }
+
+// ============================================================
+// セキュリティ / プロンプトインジェクション対策
+// ============================================================
+
+// 本人 (owner) 設定の永続化。env NOTIFY_TARGET_USER_ID から起動時に upsert される。
+model OwnerConfig {
+  id          String   @id @default("singleton")
+  ownerUserId String                 // Discord User ID (snowflake)
+  dmChannelId String?                // resolve 済み DMChannel ID（キャッシュ）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 命令解釈を許可する信頼ユーザー。HER-74 で manage_trust から CRUD される。
+model TrustedUser {
+  userId  String   @id              // Discord User ID
+  addedAt DateTime @default(now())
+  addedBy String?                    // 追加経路: "env" | "owner" | "<userId>"
+  note    String?
+}
+
+// 信頼追加の承認待ちリクエスト。HER-74 の DM ボタン承認用。
+model PendingTrustRequest {
+  id          String    @id @default(cuid())
+  userIds     String                 // JSON 配列（複数 userId を 1 リクエストに束ねる）
+  reason      String
+  requestedBy String                 // 通常 "clamane"
+  dmMessageId String?                // 承認 DM のメッセージ ID
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  resolution  String?                // "approved" | "denied" | "expired"
+
+  @@index([resolvedAt])
+}
+
+// notify_owner で送信した通知の履歴。
+model Notification {
+  id          String   @id @default(cuid())
+  severity    String                 // "info" | "warn" | "threat"
+  category    String?                // 用途分類（self_edit / injection_suspect / general など）
+  message     String                 // 通知本文
+  sentAt      DateTime @default(now())
+  dmMessageId String?                // 送信した DM メッセージ ID（分割時は最初の ID）
+
+  @@index([sentAt])
+  @@index([severity])
+}
