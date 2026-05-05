@@ -1,8 +1,9 @@
 /**
  * 信頼ユーザー判定。trusted は命令解釈を許す、untrusted はメッセージ本文をラップする。
  *
- * 起点（HER-73 時点）:
+ * trusted の起点（HER-73 時点）:
  *   - env `INITIAL_TRUSTED_USER_IDS` (カンマ区切り)
+ *   - Bot 自身の user.id（`setBotUserId` で clientReady 時に登録）
  *   - OwnerConfig.ownerUserId（owner は常に trusted）
  *
  * HER-74 で `TrustedUser` テーブルからの DB lookup が追加されるが、
@@ -12,6 +13,7 @@
 import { getOwnerConfig } from "./config.js";
 
 let cached: Set<string> | null = null;
+let botUserId: string | null = null;
 
 /**
  * env 文字列を user ID 配列にパースする（純関数）。
@@ -33,6 +35,10 @@ async function loadTrustedUserIds(): Promise<Set<string>> {
     process.env.INITIAL_TRUSTED_USER_IDS,
   );
   const set = new Set<string>(fromEnv);
+
+  // Bot 自身 (clientReady 時に setBotUserId される) は常に trusted。
+  // 自分の過去発言を素直に context として扱えるようにするため。
+  if (botUserId) set.add(botUserId);
 
   // owner は常に trusted。OwnerConfig が未初期化なら無視（テスト時など）。
   try {
@@ -62,5 +68,14 @@ export async function isTrustedUser(userId: string): Promise<boolean> {
  * - テストでも使う
  */
 export function resetTrustCache(): void {
+  cached = null;
+}
+
+/**
+ * Bot 自身の Discord user.id を trusted に登録する。
+ * Discord client の clientReady で呼ばれる前提。null でクリア。
+ */
+export function setBotUserId(id: string | null): void {
+  botUserId = id;
   cached = null;
 }

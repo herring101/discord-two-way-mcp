@@ -20,6 +20,7 @@ export {
   isTrustedUser,
   parseTrustedUserIdsFromEnv,
   resetTrustCache,
+  setBotUserId,
 } from "./trust.js";
 export {
   type WrapUntrustedOptions,

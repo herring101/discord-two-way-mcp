@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetTrustCache } from "../security/trust.js";
+import { resetTrustCache, setBotUserId } from "../security/trust.js";
 import { type FormattableMessage, formatMessage } from "./format.js";
 
 const baseMessage: FormattableMessage = {
@@ -24,11 +24,13 @@ describe("formatMessage trust 判定", () => {
 
   beforeEach(() => {
     resetTrustCache();
+    setBotUserId(null);
   });
   afterEach(() => {
     if (original === undefined) delete process.env.INITIAL_TRUSTED_USER_IDS;
     else process.env.INITIAL_TRUSTED_USER_IDS = original;
     resetTrustCache();
+    setBotUserId(null);
   });
 
   test("trusted ユーザーは UNTRUSTED 境界が付かない（現状動作維持）", async () => {
@@ -81,5 +83,14 @@ describe("formatMessage trust 判定", () => {
     expect(out).toContain("<UNTRUSTED_BEGIN");
     expect(out).not.toContain("channel=");
     expect(out).toContain('username="alice"');
+  });
+
+  test("Bot 自身 (setBotUserId で登録) は trusted、自分の発言にラップが付かない", async () => {
+    delete process.env.INITIAL_TRUSTED_USER_IDS;
+    setBotUserId("user-untrusted"); // baseMessage.author.id を bot として登録
+    const out = await formatMessage(baseMessage);
+    expect(out).not.toContain("<UNTRUSTED_BEGIN");
+    expect(out).not.toContain("<UNTRUSTED_END>");
+    expect(out).toContain("hello world");
   });
 });
