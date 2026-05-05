@@ -8,6 +8,7 @@ import {
 import { removePidFile } from "./db/client.js";
 import { DiscordClient } from "./discord/client.js";
 import { toolRegistry } from "./mcp/tools/index.js";
+import { MCP_SERVER_INSTRUCTIONS } from "./security/instructions.js";
 import { getLogger } from "./shared/logger.js";
 
 const logger = getLogger("main");
@@ -25,6 +26,7 @@ const server = new Server(
     capabilities: {
       tools: {},
     },
+    instructions: MCP_SERVER_INSTRUCTIONS,
   },
 );
 

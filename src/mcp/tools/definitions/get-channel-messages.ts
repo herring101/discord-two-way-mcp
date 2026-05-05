@@ -185,7 +185,7 @@ defineTool(
         }),
       );
 
-      return textResult(formatMessages(formattableMessages));
+      return textResult(await formatMessages(formattableMessages));
     } catch (error) {
       throw wrapError(error, "fetch messages");
     }
