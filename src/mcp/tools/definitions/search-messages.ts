@@ -198,7 +198,7 @@ defineTool(
       const sortedMessages =
         sortBy === "oldest" ? formattableMessages : formattableMessages;
 
-      return textResult(formatMessages(sortedMessages));
+      return textResult(await formatMessages(sortedMessages));
     } catch (error) {
       throw wrapError(error, "search messages");
     }

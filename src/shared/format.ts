@@ -3,6 +3,8 @@
  * リアルタイム通知とツール取得で統一したプレーンテキスト形式を提供する
  */
 
+import { isTrustedUser, wrapUntrusted } from "../security/index.js";
+
 /**
  * フォーマット可能なメッセージの型
  */
@@ -141,8 +143,11 @@ function formatEmbed(embed: FormattableEmbed): string {
  * 形式:
  * [#channel-name (ch:1234567890)] 表示名 (@username, u:268712085750415360) - 16:45 [msg:1459767163513602236]
  * メッセージ内容 (添付: image.png)
+ *
+ * untrusted ユーザーのメッセージは body 部分のみ <UNTRUSTED_BEGIN ...> ... <UNTRUSTED_END> で
+ * ラップされる（ヘッダーは bot 生成のメタなので素のまま）。
  */
-export function formatMessage(msg: FormattableMessage): string {
+export async function formatMessage(msg: FormattableMessage): Promise<string> {
   // チャンネル部分
   const channelPart = msg.channelName
     ? `[#${msg.channelName} (ch:${msg.channelId})]`
@@ -166,7 +171,7 @@ export function formatMessage(msg: FormattableMessage): string {
   const header = `${channelPart} ${userPart} - ${timePart} ${msgIdPart}${replyPart}`;
 
   // 内容行（添付ファイルがあれば追加）
-  let content = msg.content;
+  let body = msg.content;
   if (msg.attachments && msg.attachments.length > 0) {
     const attachmentTexts = msg.attachments.map((a) => {
       if (a.parsedContent) return `[${a.filename}] ${a.parsedContent}`;
@@ -174,7 +179,7 @@ export function formatMessage(msg: FormattableMessage): string {
       return `[${a.filename}]`;
     });
     const attachmentSection = `===添付ファイル===\n${attachmentTexts.join("\n")}`;
-    content = content ? `${content}\n${attachmentSection}` : attachmentSection;
+    body = body ? `${body}\n${attachmentSection}` : attachmentSection;
   }
 
   // Embed情報
@@ -190,7 +195,7 @@ export function formatMessage(msg: FormattableMessage): string {
           : embedTexts
               .map((text, i) => `===Embed ${i + 1}===\n${text}`)
               .join("\n");
-      content = content ? `${content}\n${embedSection}` : embedSection;
+      body = body ? `${body}\n${embedSection}` : embedSection;
     }
   }
 
@@ -198,10 +203,23 @@ export function formatMessage(msg: FormattableMessage): string {
   if (msg.reactions && msg.reactions.length > 0) {
     const reactionTexts = msg.reactions.map((r) => `[${r.emoji} ${r.count}]`);
     const reactionLine = reactionTexts.join(" ");
-    content = content ? `${content}\n${reactionLine}` : reactionLine;
+    body = body ? `${body}\n${reactionLine}` : reactionLine;
   }
 
-  return `${header}\n${content}`;
+  // untrusted ユーザーは body をラップ
+  const trusted = await isTrustedUser(msg.author.id);
+  const finalBody = trusted
+    ? body
+    : wrapUntrusted({
+        source: `discord:user:${msg.author.id}`,
+        body,
+        meta: {
+          username: msg.author.username,
+          ...(msg.channelName ? { channel: msg.channelName } : {}),
+        },
+      });
+
+  return `${header}\n${finalBody}`;
 }
 
 /**
@@ -210,10 +228,10 @@ export function formatMessage(msg: FormattableMessage): string {
  * @param messages フォーマット対象のメッセージ配列（時系列順を想定）
  * @param initialDate 最初の日付セパレータ判定用の基準日（省略時は最初のメッセージで必ずセパレータを出力）
  */
-export function formatMessages(
+export async function formatMessages(
   messages: FormattableMessage[],
   initialDate?: Date,
-): string {
+): Promise<string> {
   if (messages.length === 0) {
     return "(メッセージなし)";
   }
@@ -228,7 +246,7 @@ export function formatMessages(
     }
     lastDate = msg.timestamp;
 
-    lines.push(formatMessage(msg));
+    lines.push(await formatMessage(msg));
   }
 
   return lines.join("\n\n");

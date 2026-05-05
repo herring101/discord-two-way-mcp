@@ -459,7 +459,7 @@ export class DiscordClient {
     this.lastNotifiedDate = message.createdAt;
 
     // メッセージ本体を送信
-    const notification = formatMessage(formattable);
+    const notification = await formatMessage(formattable);
     sendToTmux(this.tmuxSession, notification);
   }
 
