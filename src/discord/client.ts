@@ -32,6 +32,7 @@ import {
 import { getLogger } from "../shared/logger.js";
 import { getTmuxSession, sendToTmux } from "../shared/tmux.js";
 import { importAllGuildsAsync } from "./import.js";
+import { handleButtonInteraction } from "./interaction-router.js";
 import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
 
 const logger = getLogger("discord");
@@ -117,11 +118,15 @@ export class DiscordClient {
       this.handleMessage(message);
     });
 
-    // スラッシュコマンドのハンドリング
+    // スラッシュコマンド + Button のハンドリング
     this.client.on(Events.InteractionCreate, (interaction: Interaction) => {
       if (interaction.isChatInputCommand()) {
         handleSlashCommand(interaction).catch((error) => {
           logger.error("Failed to handle slash command:", error);
+        });
+      } else if (interaction.isButton()) {
+        handleButtonInteraction(interaction).catch((error) => {
+          logger.error("Failed to handle button interaction:", error);
         });
       }
     });

@@ -17,10 +17,22 @@ export {
   splitMessage,
 } from "./notify.js";
 export {
+  attachDmMessageId,
+  createPendingTrustRequest,
+  findPendingTrustRequest,
+  isExpired,
+  type PendingTrustRequest,
+  resolvePendingTrustRequest,
+} from "./pending-trust.js";
+export {
+  addTrustedUsers,
   isTrustedUser,
+  listTrustedUsers,
   parseTrustedUserIdsFromEnv,
+  removeTrustedUsers,
   resetTrustCache,
   setBotUserId,
+  type TrustedUserEntry,
 } from "./trust.js";
 export {
   type WrapUntrustedOptions,

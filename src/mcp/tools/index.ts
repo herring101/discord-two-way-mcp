@@ -11,6 +11,7 @@ import "./definitions/get-channels-list.js";
 import "./definitions/get-unread-summary.js";
 import "./definitions/import-guild-messages.js";
 import "./definitions/list-reminders.js";
+import "./definitions/manage-trust.js";
 import "./definitions/notify-owner.js";
 import "./definitions/search-messages.js";
 import "./definitions/send-message.js";
