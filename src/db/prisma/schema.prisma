@@ -19,8 +19,8 @@ model Guild {
 
 model Channel {
   id        String    @id // Discord snowflake ID
-  guildId   String
-  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guildId   String?   // null for DM channels
+  guild     Guild?    @relation(fields: [guildId], references: [id], onDelete: Cascade)
   name      String
   type      Int // Discord channel type
   position  Int?
@@ -39,8 +39,8 @@ model Message {
   id             String       @id // Discord snowflake ID
   channelId      String
   channel        Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  guildId        String
-  guild          Guild        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guildId        String?      // null for DMs
+  guild          Guild?       @relation(fields: [guildId], references: [id], onDelete: Cascade)
   authorId       String
   authorUsername String
   authorDisplayName String?   // サーバーニックネーム
