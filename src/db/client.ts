@@ -310,10 +310,12 @@ export async function saveChannel(
     position?: number;
     parentId?: string | null;
   },
-  guildId: string,
+  guildId: string | null,
 ): Promise<void> {
   const db = getPrismaClient();
-  const channelName = "name" in channel ? (channel.name as string) : "unknown";
+  // DM channel は name が無い (recipient.username などで派生する場合あり) → "DM" にフォールバック
+  const channelName =
+    "name" in channel && channel.name ? (channel.name as string) : "DM";
   const position = "position" in channel ? (channel.position as number) : 0;
   const parentId =
     "parentId" in channel ? (channel.parentId as string | null) : null;
@@ -337,10 +339,9 @@ export async function saveChannel(
  */
 export async function saveMessage(message: Message): Promise<void> {
   const db = getPrismaClient();
-  const guildId = message.guild?.id;
-  if (!guildId) return; // DMは現時点では保存しない
+  const guildId = message.guild?.id ?? null;
 
-  // ギルドとチャンネルを先に保存
+  // ギルドとチャンネルを先に保存 (DM の場合 guild は null、Channel.guildId も null)
   if (message.guild) {
     await saveGuild(message.guild);
   }
