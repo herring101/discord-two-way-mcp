@@ -83,11 +83,32 @@ export interface JsonRpcLite {
   error?: { code: number; message: string; data?: unknown };
 }
 
-export type ChildState = "spawning" | "ready" | "give_up";
+/**
+ * MCP lifecycle に沿った proxy の状態。
+ *
+ * 進行: idle → initialize_received → client_initialized → running
+ *       (失敗系: → give_up)
+ *
+ * - idle: proxy 起動直後、client から initialize がまだ来ていない
+ * - initialize_received: client.initialize に対して synthetic response 送信済。
+ *   client の notifications/initialized を待っている (それまでは
+ *   server-initiated request/notification は spec 上禁止)
+ * - client_initialized: client.notifications/initialized を受信。
+ *   child の init replay を kick off できる
+ * - running: child の init replay 完了 + tools/list cache 済 +
+ *   notifications/tools/list_changed を送信済の通常運転状態
+ * - give_up: child crash 5 回失敗で諦め
+ */
+export type ProxyState =
+  | "idle"
+  | "initialize_received"
+  | "client_initialized"
+  | "running"
+  | "give_up";
 
 export interface ClientMessageState {
   restarting: boolean;
-  childState: ChildState;
+  proxyState: ProxyState;
 }
 
 export type ClientMessageAction =
@@ -115,9 +136,9 @@ export type ClientMessageAction =
  *  3. tools/list → synthetic_tools_list (cached + [RESTART_TOOL])
  *  4. tools/call name=restart_server → intercept_restart
  *  5. restarting 中: request fail_fast、notification drop
- *  6. childState=give_up: request fail_fast、notification drop
- *  7. childState=spawning: request fail_fast (server starting)、notification drop
- *  8. それ以外: forward
+ *  6. proxyState=give_up: request fail_fast、notification drop
+ *  7. proxyState !== running: request fail_fast (server starting)、notification drop
+ *  8. それ以外 (running && !restarting): forward
  */
 export function classifyClientMessage(
   msg: JsonRpcLite,
@@ -149,7 +170,7 @@ export function classifyClientMessage(
     return { kind: "drop" };
   }
 
-  if (state.childState === "give_up") {
+  if (state.proxyState === "give_up") {
     if (isRequest) {
       return {
         kind: "fail_fast",
@@ -159,7 +180,7 @@ export function classifyClientMessage(
     return { kind: "drop" };
   }
 
-  if (state.childState === "spawning") {
+  if (state.proxyState !== "running") {
     if (isRequest) {
       return {
         kind: "fail_fast",

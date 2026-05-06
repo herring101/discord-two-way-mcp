@@ -126,13 +126,23 @@ describe("backoffMs", () => {
 // ============================================================
 
 describe("classifyClientMessage", () => {
-  const ready = { restarting: false, childState: "ready" as const };
-  const spawning = { restarting: false, childState: "spawning" as const };
-  const giveUp = { restarting: false, childState: "give_up" as const };
-  const restarting = { restarting: true, childState: "ready" as const };
+  const idle = { restarting: false, proxyState: "idle" as const };
+  const initRecv = {
+    restarting: false,
+    proxyState: "initialize_received" as const,
+  };
+  const clientInit = {
+    restarting: false,
+    proxyState: "client_initialized" as const,
+  };
+  const running = { restarting: false, proxyState: "running" as const };
+  const giveUp = { restarting: false, proxyState: "give_up" as const };
+  const restarting = { restarting: true, proxyState: "running" as const };
 
-  test("initialize は intercept_initialize (state 関わらず)", () => {
-    for (const state of [ready, spawning, giveUp, restarting]) {
+  const allStates = [idle, initRecv, clientInit, running, giveUp, restarting];
+
+  test("initialize は intercept_initialize (全 state で)", () => {
+    for (const state of allStates) {
       expect(
         classifyClientMessage(
           { jsonrpc: "2.0", id: 1, method: "initialize" },
@@ -142,8 +152,8 @@ describe("classifyClientMessage", () => {
     }
   });
 
-  test("notifications/initialized は cache_initialized (state 関わらず)", () => {
-    for (const state of [ready, spawning, giveUp, restarting]) {
+  test("notifications/initialized は cache_initialized (全 state で)", () => {
+    for (const state of allStates) {
       expect(
         classifyClientMessage(
           { jsonrpc: "2.0", method: "notifications/initialized" },
@@ -153,8 +163,8 @@ describe("classifyClientMessage", () => {
     }
   });
 
-  test("tools/list は synthetic_tools_list (state 関わらず)", () => {
-    for (const state of [ready, spawning, giveUp, restarting]) {
+  test("tools/list は synthetic_tools_list (全 state で)", () => {
+    for (const state of allStates) {
       expect(
         classifyClientMessage(
           { jsonrpc: "2.0", id: 2, method: "tools/list" },
@@ -173,12 +183,12 @@ describe("classifyClientMessage", () => {
           method: "tools/call",
           params: { name: RESTART_TOOL_NAME, arguments: { reason: "x" } },
         },
-        ready,
+        running,
       ).kind,
     ).toBe("intercept_restart");
   });
 
-  test("ready 中の通常 tools/call は forward", () => {
+  test("running 中の通常 tools/call は forward", () => {
     expect(
       classifyClientMessage(
         {
@@ -187,7 +197,7 @@ describe("classifyClientMessage", () => {
           method: "tools/call",
           params: { name: "send_message", arguments: {} },
         },
-        ready,
+        running,
       ).kind,
     ).toBe("forward");
   });
@@ -218,7 +228,7 @@ describe("classifyClientMessage", () => {
     });
   });
 
-  describe("シナリオ 3: childState=give_up", () => {
+  describe("シナリオ 3: proxyState=give_up", () => {
     test("通常 request は fail_fast 'child unavailable (...)'", () => {
       const action = classifyClientMessage(
         {
@@ -245,8 +255,56 @@ describe("classifyClientMessage", () => {
     });
   });
 
-  describe("childState=spawning (HER-79 新設、ready 前)", () => {
-    test("通常 request は fail_fast 'server starting, please retry'", () => {
+  describe("非 running state は通常 request を fail_fast", () => {
+    const nonRunning = [
+      ["idle", idle],
+      ["initialize_received", initRecv],
+      ["client_initialized", clientInit],
+    ] as const;
+
+    for (const [label, state] of nonRunning) {
+      test(`${label}: tools/call は 'server starting, please retry'`, () => {
+        const action = classifyClientMessage(
+          {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "send_message" },
+          },
+          state,
+        );
+        expect(action.kind).toBe("fail_fast");
+        if (action.kind === "fail_fast") {
+          expect(action.message).toContain("server starting");
+        }
+      });
+      test(`${label}: notification は drop`, () => {
+        expect(
+          classifyClientMessage(
+            { jsonrpc: "2.0", method: "notifications/cancelled" },
+            state,
+          ).kind,
+        ).toBe("drop");
+      });
+    }
+  });
+
+  describe("Phase 1-C: client_initialized 前は forward 不可 (notifications/tools/list_changed が出ない事の前提)", () => {
+    test("idle / initialize_received は通常 request を forward しない", () => {
+      for (const state of [idle, initRecv]) {
+        const action = classifyClientMessage(
+          {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "send_message" },
+          },
+          state,
+        );
+        expect(action.kind).not.toBe("forward");
+      }
+    });
+    test("client_initialized でも未だ forward しない (running 待ち)", () => {
       const action = classifyClientMessage(
         {
           jsonrpc: "2.0",
@@ -254,23 +312,21 @@ describe("classifyClientMessage", () => {
           method: "tools/call",
           params: { name: "send_message" },
         },
-        spawning,
+        clientInit,
       );
-      expect(action.kind).toBe("fail_fast");
-      if (action.kind === "fail_fast") {
-        expect(action.message).toContain("server starting");
-      }
+      expect(action.kind).not.toBe("forward");
     });
-    test("notification は drop", () => {
-      expect(
-        classifyClientMessage(
-          { jsonrpc: "2.0", method: "notifications/cancelled" },
-          spawning,
-        ).kind,
-      ).toBe("drop");
-    });
-    test("tools/list / initialize は spawning でも synthetic で対応 (前述テスト参照)", () => {
-      // 上の "initialize は intercept_initialize" / "tools/list は synthetic_tools_list" で確認済
+    test("running になって初めて forward", () => {
+      const action = classifyClientMessage(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "send_message" },
+        },
+        running,
+      );
+      expect(action.kind).toBe("forward");
     });
   });
 });
