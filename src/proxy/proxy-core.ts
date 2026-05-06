@@ -6,6 +6,11 @@
 import type { ToolDefinition } from "../mcp/tools/registry.js";
 
 export const RESTART_TOOL_NAME = "restart_server";
+export const PROXY_PROTOCOL_VERSION = "2025-03-26";
+export const PROXY_SERVER_INFO = {
+  name: "discord-mcp-proxy",
+  version: "1.0.0",
+};
 
 export const RESTART_TOOL: ToolDefinition = {
   name: RESTART_TOOL_NAME,
@@ -23,8 +28,9 @@ export const RESTART_TOOL: ToolDefinition = {
 };
 
 /**
- * child の `tools/list` レスポンスに proxy 自身の tool（`restart_server`）を合算する。
- * 名前衝突した場合は proxy 側を優先（child のを除外）。
+ * tools/list 用に child の tools 配列に proxy 自身の tool を合算する。
+ * proxy は cache した tools 配列に対してこれを使う (proxy 自前で synthetic
+ * tools/list を組み立てる際の merge ヘルパー)。名前衝突したら proxy 側を採用。
  */
 export function mergeTools(
   childTools: ToolDefinition[],
@@ -77,28 +83,55 @@ export interface JsonRpcLite {
   error?: { code: number; message: string; data?: unknown };
 }
 
+export type ChildState = "spawning" | "ready" | "give_up";
+
 export interface ClientMessageState {
   restarting: boolean;
-  crashGiveUp: boolean;
+  childState: ChildState;
 }
 
 export type ClientMessageAction =
+  /** proxy 自前で synthetic initialize response を返し、child 初期化を kick off */
+  | { kind: "intercept_initialize" }
+  /** notifications/initialized を cache、ready なら forward */
+  | { kind: "cache_initialized" }
+  /** proxy 自前で cached tools list (or [RESTART_TOOL] のみ) を即返却 */
+  | { kind: "synthetic_tools_list" }
+  /** restart_server tool 呼び出しを proxy 自身で処理 */
   | { kind: "intercept_restart" }
+  /** child へ素通り forward (state=ready 前提) */
   | { kind: "forward" }
+  /** request に対して error response を即返却 */
   | { kind: "fail_fast"; message: string }
+  /** notification を drop */
   | { kind: "drop" };
 
 /**
  * Claude → proxy に届いたメッセージ 1 件を分類する。
- * - tools/call name=restart_server → proxy 自身が処理（intercept_restart）
- * - restarting 中: request は "server restarting" で fail_fast、notification は drop
- * - crashGiveUp 中: request は "child unavailable (...)" で fail_fast、notification は drop
- * - それ以外: forward
+ *
+ * 分岐優先順位:
+ *  1. initialize → intercept_initialize (synthetic response、child 待たない)
+ *  2. notifications/initialized → cache_initialized
+ *  3. tools/list → synthetic_tools_list (cached + [RESTART_TOOL])
+ *  4. tools/call name=restart_server → intercept_restart
+ *  5. restarting 中: request fail_fast、notification drop
+ *  6. childState=give_up: request fail_fast、notification drop
+ *  7. childState=spawning: request fail_fast (server starting)、notification drop
+ *  8. それ以外: forward
  */
 export function classifyClientMessage(
   msg: JsonRpcLite,
   state: ClientMessageState,
 ): ClientMessageAction {
+  if (msg.method === "initialize") {
+    return { kind: "intercept_initialize" };
+  }
+  if (msg.method === "notifications/initialized") {
+    return { kind: "cache_initialized" };
+  }
+  if (msg.method === "tools/list") {
+    return { kind: "synthetic_tools_list" };
+  }
   if (
     msg.method === "tools/call" &&
     msg.params !== null &&
@@ -116,7 +149,7 @@ export function classifyClientMessage(
     return { kind: "drop" };
   }
 
-  if (state.crashGiveUp) {
+  if (state.childState === "give_up") {
     if (isRequest) {
       return {
         kind: "fail_fast",
@@ -126,27 +159,58 @@ export function classifyClientMessage(
     return { kind: "drop" };
   }
 
+  if (state.childState === "spawning") {
+    if (isRequest) {
+      return {
+        kind: "fail_fast",
+        message: "server starting, please retry",
+      };
+    }
+    return { kind: "drop" };
+  }
+
   return { kind: "forward" };
 }
 
 /**
- * tools/list レスポンスメッセージに proxy 自身の tool を合算した新しい
- * メッセージオブジェクトを返す（イミュータブル）。
- * - result が tools 配列を持たない場合は元のメッセージをそのまま返す
+ * proxy 自前の synthetic initialize response を組み立てる。
+ * client から送られた `initialize` request の `id` と `protocolVersion` をエコーする。
  */
-export function maybeInjectIntoToolsListResult(
-  msg: JsonRpcLite,
-  additional: ToolDefinition[],
+export function buildSyntheticInitializeResponse(
+  req: JsonRpcLite,
 ): JsonRpcLite {
-  if (msg.result === null || typeof msg.result !== "object") return msg;
-  const result = msg.result as { tools?: unknown };
-  if (!Array.isArray(result.tools)) return msg;
+  const params = (req.params ?? {}) as { protocolVersion?: unknown };
+  const protocolVersion =
+    typeof params.protocolVersion === "string"
+      ? params.protocolVersion
+      : PROXY_PROTOCOL_VERSION;
   return {
-    ...msg,
+    jsonrpc: "2.0",
+    id: req.id ?? null,
     result: {
-      ...result,
-      tools: mergeTools(result.tools as ToolDefinition[], additional),
+      protocolVersion,
+      serverInfo: { ...PROXY_SERVER_INFO },
+      capabilities: { tools: { listChanged: true } },
     },
+  };
+}
+
+/**
+ * proxy 自前の synthetic tools/list response を組み立てる。
+ * cachedTools が null なら proxy tool のみを返す（child not ready / restart 中）。
+ */
+export function buildSyntheticToolsListResponse(
+  req: JsonRpcLite,
+  cachedTools: ToolDefinition[] | null,
+  proxyTools: ToolDefinition[],
+): JsonRpcLite {
+  const tools = cachedTools
+    ? mergeTools(cachedTools, proxyTools)
+    : [...proxyTools];
+  return {
+    jsonrpc: "2.0",
+    id: req.id ?? null,
+    result: { tools },
   };
 }
 
@@ -178,17 +242,12 @@ export function nextCrashRecoveryStep(
 }
 
 // ============================================================
-// performRestart (副作用は注入された関数に集約、テスト可能)
+// replayInitialize (proxy ↔ child 間の初期化、副作用は注入)
 // ============================================================
 
-export interface PerformRestartContext {
-  oldPid?: number;
+export interface ReplayInitializeContext {
   cachedInitialize: JsonRpcLite | null;
   cachedInitialized: JsonRpcLite | null;
-  /** 旧 child を SIGTERM (5s) → SIGKILL の段で確実に殺す */
-  killAndWaitOldChild: () => Promise<void>;
-  /** 新 child を spawn し、ready 化されたら pid を返す */
-  spawnNewChild: () => Promise<{ pid: number }>;
   /** child に request を送り、id 一致の response を待つ。timeout で null */
   sendAndWait: (
     req: JsonRpcLite,
@@ -197,7 +256,50 @@ export interface PerformRestartContext {
   /** 通知 (id なし) を child に送る */
   sendToChild: (msg: JsonRpcLite) => boolean;
   nextProxyId: () => string;
-  /** テスト用に時刻ソースを差し替え可 */
+  /** initialize response 待ち timeout (ms)、デフォルト 30s */
+  timeoutMs?: number;
+}
+
+export type ReplayInitializeResult =
+  | { kind: "ok" }
+  | { kind: "skipped" } // cachedInitialize なし（client がまだ initialize 送ってない）
+  | { kind: "error"; error: string };
+
+/**
+ * proxy が保持している initialize / initialized を child に再送する。
+ * - 通常 restart や crash recovery の後で呼ぶ
+ * - cachedInitialize が無い場合は skipped を返す（呼び出し側が判断）
+ */
+export async function replayInitialize(
+  ctx: ReplayInitializeContext,
+): Promise<ReplayInitializeResult> {
+  if (!ctx.cachedInitialize) return { kind: "skipped" };
+  const replayId = ctx.nextProxyId();
+  const replay: JsonRpcLite = { ...ctx.cachedInitialize, id: replayId };
+  const response = await ctx.sendAndWait(replay, ctx.timeoutMs ?? 30000);
+  if (!response) {
+    return { kind: "error", error: "child initialize timeout" };
+  }
+  if (response.error) {
+    return {
+      kind: "error",
+      error: `child initialize error: ${response.error.message}`,
+    };
+  }
+  if (ctx.cachedInitialized) {
+    ctx.sendToChild(ctx.cachedInitialized);
+  }
+  return { kind: "ok" };
+}
+
+// ============================================================
+// performRestart (kill + spawn のみに簡素化、initialize replay は呼び出し側で別途)
+// ============================================================
+
+export interface PerformRestartContext {
+  oldPid?: number;
+  killAndWaitOldChild: () => Promise<void>;
+  spawnNewChild: () => Promise<{ pid: number }>;
   now?: () => number;
 }
 
@@ -206,48 +308,27 @@ export type PerformRestartResult =
   | { ok: false; error: string };
 
 /**
- * restart の主要ステップ:
- *   1. 旧 child kill 待ち
- *   2. 新 child spawn
- *   3. cachedInitialize があれば replay (15s timeout)
- *   4. cachedInitialized があれば forward
- *
- * I/O は ctx 経由で注入。純関数化はしないが、副作用は外で組み立てるので
- * timeout / sendAndWait の振舞を制御してテストできる。
+ * restart の kill + spawn ステップ。initialize replay は呼び出し側で
+ * `replayInitialize` を別途呼ぶ。例外は ok:false に丸める。
  */
 export async function performRestart(
   ctx: PerformRestartContext,
 ): Promise<PerformRestartResult> {
   const now = ctx.now ?? Date.now;
   const start = now();
-
-  await ctx.killAndWaitOldChild();
-  const newChild = await ctx.spawnNewChild();
-
-  if (ctx.cachedInitialize) {
-    const replay: JsonRpcLite = {
-      ...ctx.cachedInitialize,
-      id: ctx.nextProxyId(),
+  try {
+    await ctx.killAndWaitOldChild();
+    const newChild = await ctx.spawnNewChild();
+    return {
+      ok: true,
+      oldPid: ctx.oldPid,
+      newPid: newChild.pid,
+      durationMs: now() - start,
     };
-    const initResponse = await ctx.sendAndWait(replay, 15000);
-    if (!initResponse) {
-      return { ok: false, error: "child initialize timeout (15s)" };
-    }
-    if (initResponse.error) {
-      return {
-        ok: false,
-        error: `child initialize error: ${initResponse.error.message}`,
-      };
-    }
-    if (ctx.cachedInitialized) {
-      ctx.sendToChild(ctx.cachedInitialized);
-    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
-
-  return {
-    ok: true,
-    oldPid: ctx.oldPid,
-    newPid: newChild.pid,
-    durationMs: now() - start,
-  };
 }

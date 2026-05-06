@@ -5,25 +5,42 @@
  * Discord MCP server (`src/index.ts`) を child process として spawn し、
  * Claude ↔ proxy ↔ child の stdio 仲介を行う。
  *
- * 機能:
- *   - tools/list の結果に `restart_server` tool を合算
- *   - `restart_server` tool 呼び出しで child を kill → respawn → re-initialize
- *   - child crash 時は指数バックオフで 5 回まで自動 respawn
- *   - restart / crash 中の in-flight request は "server restarting" / "child crashed" で fail-fast
+ * 起動シーケンス (実機検証 5/6 で発覚した initialize timeout 修正後):
+ *   1. proxy main → 即 child を eager spawn (state="spawning")
+ *   2. Claude → proxy: `initialize` を受信したら proxy 自前の synthetic
+ *      response を **即返す** (child の起動完了を待たない)。並行して
+ *      cachedInitialize を保持し、replayInitialize() を kick off。
+ *   3. child の MCP layer (StdioServerTransport) が起動 → proxy が cached
+ *      initialize を child に送り、child の response を内部で消費。
+ *      cachedInitialized があれば forward。state="ready" に遷移。
+ *   4. ready 化と同時に proxy が child の tools/list を fetch・cache し、
+ *      `notifications/tools/list_changed` を Claude に送って refresh を促す。
+ *   5. Claude → proxy: `tools/list` は **常に proxy 自前で synthetic 応答**
+ *      (cachedTools + RESTART_TOOL の merge)。未 ready なら [RESTART_TOOL]
+ *      のみ即返す (Option B)。
+ *   6. `tools/call` は state=ready なら child へ forward、未 ready なら
+ *      "server starting" で fail-fast。`restart_server` は proxy 自身が処理。
  *
- * 設計参照: HER-79 確定設計書 (mcp-hot-reload neilopet/mcp-server-hmr の設計を参考、import なし)
+ * その他:
+ *   - child crash 時は指数バックオフで 5 回まで自動 respawn
+ *   - restart / crash 中の in-flight request は fail-fast
+ *   - shutdown 時は SIGTERM → 5s 待 → SIGKILL で確実に child を殺す
  */
 
 import { join } from "node:path";
+import type { ToolDefinition } from "../mcp/tools/registry.js";
 import { getLogger } from "../shared/logger.js";
 import {
+  buildSyntheticInitializeResponse,
+  buildSyntheticToolsListResponse,
+  type ChildState,
   classifyClientMessage,
   extractLines,
   type JsonRpcLite,
-  maybeInjectIntoToolsListResult,
   nextCrashRecoveryStep,
   performRestart,
   RESTART_TOOL,
+  replayInitialize,
 } from "./proxy-core.js";
 
 const logger = getLogger("proxy");
@@ -31,6 +48,7 @@ const logger = getLogger("proxy");
 const CHILD_ENTRY = join(import.meta.dirname, "../index.ts");
 const CRASH_MAX_ATTEMPTS = 5;
 const SHUTDOWN_GRACE_MS = 5000;
+const TOOLS_LIST_FETCH_TIMEOUT_MS = 10000;
 
 // ============================================================
 // ManagedChild - intentionalKill を per-child で持つ (H1 fix)
@@ -40,11 +58,6 @@ interface ManagedChild {
   // biome-ignore lint/suspicious/noExplicitAny: Bun.Subprocess の generic 型は流動的なので any
   proc: any;
   pid: number;
-  /**
-   * この child を意図的に kill しているフラグ。restart や proxy shutdown 時に true。
-   * 各 child の `exited.then` は自分の ManagedChild 経由でこの値を見るので、
-   * 別 child のための fla リセットの影響を受けない。
-   */
   intentionalKill: boolean;
 }
 
@@ -54,14 +67,19 @@ let current: ManagedChild | null = null;
 // 共有 state
 // ============================================================
 
+let childState: ChildState = "spawning";
 let restarting = false;
 let crashAttempt = 0;
-let crashGiveUp = false;
 
 let cachedInitialize: JsonRpcLite | null = null;
 let cachedInitializedNotification: JsonRpcLite | null = null;
+let cachedToolsList: ToolDefinition[] | null = null;
 
-const clientPending = new Map<string | number, { method: string }>();
+/**
+ * forward 済みで child からの response 待ちの client request id を tracking する。
+ * restart / crash 時に対応する error response を返す fail-fast 用 (それ以外の用途は無い)。
+ */
+const clientPending = new Set<string | number>();
 const proxyWaiters = new Map<string | number, (msg: JsonRpcLite) => void>();
 
 let proxyIdCounter = 0;
@@ -69,6 +87,8 @@ function nextProxyId(): string {
   proxyIdCounter += 1;
   return `__proxy_${Date.now()}_${proxyIdCounter}`;
 }
+
+const PROXY_TOOLS: ToolDefinition[] = [RESTART_TOOL];
 
 // ============================================================
 // I/O
@@ -92,6 +112,36 @@ function sendToChild(msg: JsonRpcLite): boolean {
   }
 }
 
+/**
+ * proxy 自身が child に送る request の応答を待つ。
+ * timeout は ms、応答なしは null を返す。id は呼び出し側で nextProxyId() してから渡すこと。
+ */
+function sendAndWait(
+  req: JsonRpcLite,
+  timeoutMs: number,
+): Promise<JsonRpcLite | null> {
+  return new Promise((resolve) => {
+    const id = req.id;
+    if (id === undefined || id === null) {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      proxyWaiters.delete(id);
+      resolve(null);
+    }, timeoutMs);
+    proxyWaiters.set(id, (msg) => {
+      clearTimeout(timer);
+      resolve(msg);
+    });
+    if (!sendToChild(req)) {
+      proxyWaiters.delete(id);
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
 // ============================================================
 // Spawn / lifecycle
 // ============================================================
@@ -111,12 +161,10 @@ async function spawnChild(): Promise<ManagedChild> {
   current = managed;
   logger.info(`child spawned pid=${managed.pid}`);
 
-  // 並列で stdout を読み続ける
   pumpChildStdout(managed).catch((e) =>
     logger.error(`pumpChildStdout fatal: ${String(e)}`),
   );
 
-  // 終了を監視。closure で managed を捕まえているので global flag race を避ける
   proc.exited.then((code: number) => {
     logger.warn(`child pid=${managed.pid} exited code=${code}`);
     if (managed.intentionalKill) return;
@@ -180,46 +228,129 @@ async function pumpClientStdin(): Promise<void> {
 }
 
 // ============================================================
+// State transitions
+// ============================================================
+
+/**
+ * child の MCP layer 初期化が成功して使える状態になったら呼ぶ。
+ * - cachedToolsList を child から fetch
+ * - notifications/tools/list_changed を Claude に送信
+ */
+async function markReady(reason: string): Promise<void> {
+  childState = "ready";
+  logger.info(`child ready (reason=${reason}), fetching tools/list`);
+  await fetchAndCacheToolsList();
+  sendToClient({
+    jsonrpc: "2.0",
+    method: "notifications/tools/list_changed",
+  });
+}
+
+async function fetchAndCacheToolsList(): Promise<void> {
+  const fetchId = nextProxyId();
+  const response = await sendAndWait(
+    { jsonrpc: "2.0", id: fetchId, method: "tools/list" },
+    TOOLS_LIST_FETCH_TIMEOUT_MS,
+  );
+  if (!response) {
+    logger.warn("tools/list fetch timeout, cache stays unchanged");
+    return;
+  }
+  if (response.error) {
+    logger.warn(`tools/list fetch error: ${response.error.message}`);
+    return;
+  }
+  const result = response.result as { tools?: unknown };
+  if (Array.isArray(result?.tools)) {
+    cachedToolsList = result.tools as ToolDefinition[];
+    logger.info(`cached ${cachedToolsList.length} child tools`);
+  }
+}
+
+/**
+ * client から initialize を受け取ったタイミングで child の初期化を kick off する。
+ * - 既に ready ならスキップ
+ * - cachedInitialize を replay → 成功なら markReady
+ */
+async function kickoffChildInitialize(): Promise<void> {
+  if (childState === "ready") return;
+  if (childState === "give_up") return;
+  if (!cachedInitialize) return;
+
+  const result = await replayInitialize({
+    cachedInitialize,
+    cachedInitialized: cachedInitializedNotification,
+    sendAndWait,
+    sendToChild,
+    nextProxyId,
+  });
+
+  if (result.kind === "ok") {
+    await markReady("client-initiated");
+  } else if (result.kind === "error") {
+    logger.error(`kickoffChildInitialize error: ${result.error}`);
+    // 失敗時はそのうち child crash で respawn → recovery が走る想定
+  }
+}
+
+// ============================================================
 // Message routing
 // ============================================================
 
 function handleClientMessage(msg: JsonRpcLite): void {
-  // initialize / initialized は restart 時の replay 用にキャッシュ
-  if (msg.method === "initialize") {
-    cachedInitialize = msg;
-  } else if (msg.method === "notifications/initialized") {
-    cachedInitializedNotification = msg;
-  }
-
-  const action = classifyClientMessage(msg, { restarting, crashGiveUp });
+  const action = classifyClientMessage(msg, { restarting, childState });
 
   switch (action.kind) {
-    case "intercept_restart":
+    case "intercept_initialize": {
+      cachedInitialize = msg;
+      sendToClient(buildSyntheticInitializeResponse(msg));
+      kickoffChildInitialize().catch((e) =>
+        logger.error(`kickoffChildInitialize fatal: ${String(e)}`),
+      );
+      return;
+    }
+    case "cache_initialized": {
+      cachedInitializedNotification = msg;
+      // ready なら今すぐ forward。spawning 中なら kickoffChildInitialize の
+      // 末尾で forward される (replayInitialize が cachedInitialized を送る)。
+      if (childState === "ready" && !restarting) {
+        sendToChild(msg);
+      }
+      return;
+    }
+    case "synthetic_tools_list": {
+      sendToClient(
+        buildSyntheticToolsListResponse(msg, cachedToolsList, PROXY_TOOLS),
+      );
+      return;
+    }
+    case "intercept_restart": {
       handleRestartServer(msg).catch((e) =>
         logger.error(`restart_server fatal: ${String(e)}`),
       );
       return;
-    case "fail_fast":
+    }
+    case "fail_fast": {
       sendToClient({
         jsonrpc: "2.0",
         id: msg.id ?? null,
         error: { code: -32000, message: action.message },
       });
       return;
+    }
     case "drop":
-      // notification は drop（child が居ない/restart 中）
       return;
     case "forward":
       break;
   }
 
-  // request なら response routing 用に id を控える
+  // request なら restart/crash 時の fail-fast 用に id を tracking
   if (
     msg.id !== undefined &&
     msg.id !== null &&
     typeof msg.method === "string"
   ) {
-    clientPending.set(msg.id, { method: msg.method });
+    clientPending.add(msg.id);
   }
 
   if (!sendToChild(msg)) {
@@ -235,7 +366,8 @@ function handleClientMessage(msg: JsonRpcLite): void {
 }
 
 function handleChildMessage(msg: JsonRpcLite): void {
-  // proxy 自身が待っている id (initialize replay 等) は client に転送せず handler に渡す
+  // proxy 自身が待っている id (initialize replay / tools/list fetch 等) は
+  // client に転送せず handler に渡す
   if (msg.id !== undefined && msg.id !== null && proxyWaiters.has(msg.id)) {
     const waiter = proxyWaiters.get(msg.id);
     proxyWaiters.delete(msg.id);
@@ -243,17 +375,22 @@ function handleChildMessage(msg: JsonRpcLite): void {
     return;
   }
 
-  // tools/list レスポンスに restart_server を合算
-  let outgoing = msg;
-  if (msg.id !== undefined && msg.id !== null && clientPending.has(msg.id)) {
-    const p = clientPending.get(msg.id);
-    clientPending.delete(msg.id);
-    if (p?.method === "tools/list") {
-      outgoing = maybeInjectIntoToolsListResult(msg, [RESTART_TOOL]);
-    }
+  // child が tools/list_changed を発行した場合は cache invalidate + 透過 forward
+  if (msg.method === "notifications/tools/list_changed") {
+    cachedToolsList = null;
+    fetchAndCacheToolsList().catch((e) =>
+      logger.warn(`re-fetch tools/list failed: ${String(e)}`),
+    );
+    sendToClient(msg);
+    return;
   }
 
-  sendToClient(outgoing);
+  // child からの response/notification は client にそのまま forward
+  // (id があれば clientPending tracking を解放、無くても問題ない)
+  if (msg.id !== undefined && msg.id !== null) {
+    clientPending.delete(msg.id);
+  }
+  sendToClient(msg);
 }
 
 // ============================================================
@@ -291,9 +428,11 @@ async function handleRestartServer(req: JsonRpcLite): Promise<void> {
   );
 
   restarting = true;
+  childState = "spawning";
+  cachedToolsList = null;
 
   // in-flight client request は fail-fast、proxy 自身の waiter もクリア
-  for (const id of clientPending.keys()) {
+  for (const id of clientPending) {
     sendToClient({
       jsonrpc: "2.0",
       id,
@@ -303,15 +442,39 @@ async function handleRestartServer(req: JsonRpcLite): Promise<void> {
   clientPending.clear();
   proxyWaiters.clear();
 
-  const result = await performRestart({
+  const start = Date.now();
+  const spawnResult = await performRestart({
     oldPid: dyingChild?.pid,
-    cachedInitialize,
-    cachedInitialized: cachedInitializedNotification,
     killAndWaitOldChild: () => killAndWait(dyingChild),
     spawnNewChild: async () => {
       const newChild = await spawnChild();
       return { pid: newChild.pid };
     },
+    now: () => Date.now(),
+  });
+
+  if (!spawnResult.ok) {
+    restarting = false;
+    logger.error(`restart_server kill/spawn failed: ${spawnResult.error}`);
+    sendToClient({
+      jsonrpc: "2.0",
+      id: reqId,
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ ok: false, error: spawnResult.error }),
+          },
+        ],
+        isError: true,
+      },
+    });
+    return;
+  }
+
+  const initResult = await replayInitialize({
+    cachedInitialize,
+    cachedInitialized: cachedInitializedNotification,
     sendAndWait,
     sendToChild,
     nextProxyId,
@@ -319,35 +482,10 @@ async function handleRestartServer(req: JsonRpcLite): Promise<void> {
 
   restarting = false;
 
-  if (result.ok) {
-    crashAttempt = 0;
-    sendToClient({
-      jsonrpc: "2.0",
-      method: "notifications/tools/list_changed",
-    });
-    sendToClient({
-      jsonrpc: "2.0",
-      id: reqId,
-      result: {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              ok: true,
-              oldPid: result.oldPid,
-              newPid: result.newPid,
-              durationMs: result.durationMs,
-              reason,
-            }),
-          },
-        ],
-      },
-    });
-    logger.info(
-      `restart_server done: newPid=${result.newPid} durationMs=${result.durationMs}`,
+  if (initResult.kind === "error") {
+    logger.error(
+      `restart_server initialize replay failed: ${initResult.error}`,
     );
-  } else {
-    logger.error(`restart_server failed: ${result.error}`);
     sendToClient({
       jsonrpc: "2.0",
       id: reqId,
@@ -355,13 +493,42 @@ async function handleRestartServer(req: JsonRpcLite): Promise<void> {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ ok: false, error: result.error }),
+            text: JSON.stringify({ ok: false, error: initResult.error }),
           },
         ],
         isError: true,
       },
     });
+    return;
   }
+
+  // initResult が "ok" or "skipped" (cachedInitialize なし)
+  if (initResult.kind === "ok") {
+    await markReady("restart");
+  }
+  crashAttempt = 0;
+
+  sendToClient({
+    jsonrpc: "2.0",
+    id: reqId,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            oldPid: spawnResult.oldPid,
+            newPid: spawnResult.newPid,
+            durationMs: Date.now() - start,
+            reason,
+          }),
+        },
+      ],
+    },
+  });
+  logger.info(
+    `restart_server done: newPid=${spawnResult.newPid} durationMs=${Date.now() - start}`,
+  );
 }
 
 /** child を SIGTERM → 5s 待 → SIGKILL の段で殺す。dyingChild が null なら即 return */
@@ -382,44 +549,12 @@ async function killAndWait(dyingChild: ManagedChild | null): Promise<void> {
   }
 }
 
-/**
- * proxy 自身が child に送る request の応答を待つ。
- * timeout は ms、応答なしは null を返す。id は呼び出し側で nextProxyId() してから渡すこと。
- */
-function sendAndWait(
-  req: JsonRpcLite,
-  timeoutMs: number,
-): Promise<JsonRpcLite | null> {
-  return new Promise((resolve) => {
-    const id = req.id;
-    if (id === undefined || id === null) {
-      resolve(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      proxyWaiters.delete(id);
-      resolve(null);
-    }, timeoutMs);
-    proxyWaiters.set(id, (msg) => {
-      clearTimeout(timer);
-      resolve(msg);
-    });
-    if (!sendToChild(req)) {
-      proxyWaiters.delete(id);
-      clearTimeout(timer);
-      resolve(null);
-    }
-  });
-}
-
 // ============================================================
 // Crash recovery (指数バックオフ、最大 5 回)
 // ============================================================
 
 async function handleCrash(deadChild: ManagedChild): Promise<void> {
-  if (crashGiveUp) return;
-  // restart 経由で殺された child の通知ならここには来ない (intentionalKill=true)。
-  // この時点で current が deadChild と異なる場合、新 child が既に spawn 済みなので何もしない。
+  if (childState === "give_up") return;
   if (current && current !== deadChild) {
     logger.info(
       `handleCrash: deadChild pid=${deadChild.pid} but current is pid=${current.pid}, skipping`,
@@ -428,8 +563,10 @@ async function handleCrash(deadChild: ManagedChild): Promise<void> {
   }
   if (restarting) return;
 
-  // in-flight client request は fail-fast
-  for (const id of clientPending.keys()) {
+  childState = "spawning";
+  cachedToolsList = null;
+
+  for (const id of clientPending) {
     sendToClient({
       jsonrpc: "2.0",
       id,
@@ -445,7 +582,7 @@ async function handleCrash(deadChild: ManagedChild): Promise<void> {
   });
 
   if (step.kind === "give_up") {
-    crashGiveUp = true;
+    childState = "give_up";
     logger.error(
       `child crashed ${CRASH_MAX_ATTEMPTS} times, giving up. Claude 側に空 tool list を通知。`,
     );
@@ -471,37 +608,25 @@ async function handleCrash(deadChild: ManagedChild): Promise<void> {
   }
 
   try {
-    const newChild = await spawnChild();
-    if (cachedInitialize) {
-      const replay: JsonRpcLite = {
-        ...cachedInitialize,
-        id: nextProxyId(),
-      };
-      const initResponse = await sendAndWait(replay, 15000);
-      if (!initResponse || initResponse.error) {
-        throw new Error(
-          initResponse?.error
-            ? `post-crash initialize error: ${initResponse.error.message}`
-            : "post-crash initialize timeout",
-        );
-      }
-      if (cachedInitializedNotification) {
-        sendToChild(cachedInitializedNotification);
-      }
+    await spawnChild();
+    const initResult = await replayInitialize({
+      cachedInitialize,
+      cachedInitialized: cachedInitializedNotification,
+      sendAndWait,
+      sendToChild,
+      nextProxyId,
+    });
+    if (initResult.kind === "error") {
+      throw new Error(initResult.error);
+    }
+    if (initResult.kind === "ok") {
+      await markReady("post-crash-recovery");
     }
     const attempts = crashAttempt;
     crashAttempt = 0;
-    logger.info(
-      `recovery successful pid=${newChild.pid} after ${attempts} attempt(s)`,
-    );
-    sendToClient({
-      jsonrpc: "2.0",
-      method: "notifications/tools/list_changed",
-    });
+    logger.info(`recovery successful after ${attempts} attempt(s)`);
   } catch (e) {
     logger.error(`respawn ${crashAttempt} failed: ${String(e)}`);
-    // current は失敗 spawn の child を指している可能性があるので、deadChild としては
-    // 「current が指している (or null) を再帰で渡す」だけで OK
     handleCrash(current ?? deadChild).catch(() => {});
   }
 }
@@ -540,7 +665,9 @@ async function main(): Promise<void> {
     });
   });
 
+  // child を eager spawn（client が initialize を送る前から起動を進める）
   await spawnChild();
+
   pumpClientStdin().catch((e) =>
     logger.error(`pumpClientStdin fatal: ${String(e)}`),
   );
