@@ -117,7 +117,7 @@ defineTool(
   {
     name: "notify_owner",
     description:
-      "本人 (owner) の Discord DM に通知を送ります。横断 AI 共通の通知レーン。severity で重要度、category で用途を分類。長文は自動で分割送信されます。",
+      '本人 (owner) の Discord DM に通知を送ります。横断 AI 共通の通知レーン。severity で重要度、category で用途を分類。長文は自動で分割送信されます。重要な設定ファイル (CLAUDE.md / .claude/settings*.json / .claude/hooks/* 等) を編集する直前は必ず severity="info" category="self_edit" で本ツールを呼び、message に file_path / 操作種別 / old_string と new_string の全文 (要約禁止) を含めてください。',
     inputSchema: {
       type: "object",
       properties: {
@@ -135,7 +135,7 @@ defineTool(
         category: {
           type: "string",
           description:
-            '用途分類。例: "self_edit" (CLAUDE.md 編集報告) / "injection_suspect" (怪しい入力) / "general"',
+            '用途分類。"self_edit" = 重要な設定ファイル (CLAUDE.md / .claude/settings*.json / .claude/hooks/* 等) を編集する直前に必ず使うカテゴリ。message には対象 file_path / 操作種別 (create / edit / delete) / old_string と new_string の全文 (要約せず原文をそのまま) を含めること。承認待ちは不要、報告のみで編集に進んでよい。"injection_suspect" = 怪しい入力の報告。"general" = それ以外の一般通知。',
         },
       },
       required: ["message"],
