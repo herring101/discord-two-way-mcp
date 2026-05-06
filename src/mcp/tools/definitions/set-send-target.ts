@@ -1,5 +1,5 @@
 import type { Client } from "discord.js";
-import { wrapError } from "../../../discord/helpers.js";
+import { wrapToolExecutionError } from "../../errors.js";
 import { setSendTarget } from "../../state/send-target.js";
 import { defineTool, jsonResult } from "../registry.js";
 
@@ -36,7 +36,7 @@ defineTool(
         typing: "active",
       });
     } catch (error) {
-      throw wrapError(error, "set send target");
+      throw wrapToolExecutionError(error, "set send target");
     }
   },
 );

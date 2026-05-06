@@ -8,7 +8,6 @@ import { getLifecycleController } from "../../../discord/client.js";
 import {
   fetchTextBasedChannel,
   validateAndLimitNumber,
-  wrapError,
 } from "../../../discord/helpers.js";
 import { isTrustedUser } from "../../../security/trust.js";
 import { parseAttachment } from "../../../shared/attachment-parser.js";
@@ -17,6 +16,7 @@ import {
   formatMessages,
 } from "../../../shared/format.js";
 import { getLogger } from "../../../shared/logger.js";
+import { wrapToolExecutionError } from "../../errors.js";
 import { defineTool, textResult } from "../registry.js";
 
 const logger = getLogger("mcp");
@@ -200,7 +200,7 @@ defineTool(
 
       return textResult(formatMessages(formattableMessages));
     } catch (error) {
-      throw wrapError(error, "fetch messages");
+      throw wrapToolExecutionError(error, "fetch messages");
     }
   },
 );

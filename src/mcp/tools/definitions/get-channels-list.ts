@@ -1,5 +1,6 @@
 import type { Client } from "discord.js";
-import { filterTextChannels, wrapError } from "../../../discord/helpers.js";
+import { filterTextChannels } from "../../../discord/helpers.js";
+import { wrapToolExecutionError } from "../../errors.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録
@@ -38,7 +39,7 @@ defineTool(
 
       return jsonResult({ guilds: result });
     } catch (error) {
-      throw wrapError(error, "fetch channels list");
+      throw wrapToolExecutionError(error, "fetch channels list");
     }
   },
 );

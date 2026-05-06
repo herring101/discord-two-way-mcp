@@ -1,11 +1,14 @@
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Client, Message } from "discord.js";
 import { getLifecycleController } from "../../../discord/client.js";
 import {
   fetchTextBasedChannel,
   validateMessageContent,
-  wrapError,
 } from "../../../discord/helpers.js";
+import {
+  ToolInputError,
+  ToolPreconditionError,
+  wrapToolExecutionError,
+} from "../../errors.js";
 import { clearSendTarget, getSendTarget } from "../../state/send-target.js";
 import { defineTool, jsonResult } from "../registry.js";
 
@@ -33,8 +36,7 @@ defineTool(
   async (client: Client, args: Record<string, unknown>) => {
     const target = getSendTarget();
     if (!target) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
+      throw new ToolPreconditionError(
         "送信先が設定されていません。先に set_send_target で channelId（と必要なら replyToMessageId）を指定してください。",
       );
     }
@@ -47,7 +49,7 @@ defineTool(
       !permitEveryoneMention &&
       (content.includes("@everyone") || content.includes("@here"))
     ) {
-      throw new Error(
+      throw new ToolInputError(
         "全体メンションが文章に含まれています。これを送信するとこのサーバーの全員に通知が行きます。それを理解したうえで送りたい場合は permit_everyone_mention を true にして送信してください。",
       );
     }
@@ -65,10 +67,7 @@ defineTool(
       if (target.replyToMessageId) {
         const original = await channel.messages.fetch(target.replyToMessageId);
         if (!original) {
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            "Reply target message not found",
-          );
+          throw new ToolInputError("Reply target message not found");
         }
         sentMessage = await original.reply(content);
         originalMessage = {
@@ -102,7 +101,7 @@ defineTool(
       });
     } catch (error) {
       clearSendTarget();
-      throw wrapError(error, "send message");
+      throw wrapToolExecutionError(error, "send message");
     }
   },
 );

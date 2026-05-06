@@ -18,6 +18,7 @@ import {
   type Severity,
 } from "../../../security/notify.js";
 import { getLogger } from "../../../shared/logger.js";
+import { ToolInputError } from "../../errors.js";
 import { defineTool, jsonResult, type ToolResult } from "../registry.js";
 
 const logger = getLogger("notify-owner");
@@ -45,7 +46,7 @@ export async function sendOwnerNotification(
   input: { message: string; severity?: unknown; category?: string },
 ): Promise<NotifyOwnerResult> {
   const message = input.message.trim();
-  if (!message) throw new Error("message は必須です（空文字不可）。");
+  if (!message) throw new ToolInputError("message は必須です（空文字不可）。");
   const severity = parseSeverity(input.severity);
   const category =
     typeof input.category === "string" && input.category.trim().length > 0
@@ -146,7 +147,8 @@ defineTool(
     args: Record<string, unknown>,
   ): Promise<ToolResult> => {
     const message = (args.message as string | undefined)?.trim();
-    if (!message) throw new Error("message は必須です（空文字不可）。");
+    if (!message)
+      throw new ToolInputError("message は必須です（空文字不可）。");
     const result = await sendOwnerNotification(client, {
       message,
       severity: args.severity,

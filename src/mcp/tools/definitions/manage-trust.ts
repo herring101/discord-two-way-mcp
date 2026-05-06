@@ -31,6 +31,7 @@ import {
   removeTrustedUsers,
 } from "../../../security/trust.js";
 import { getLogger } from "../../../shared/logger.js";
+import { ToolInputError } from "../../errors.js";
 import { defineTool, jsonResult, type ToolResult } from "../registry.js";
 import { validateActionEnum } from "../validators.js";
 import { sendOwnerNotification } from "./notify-owner.js";
@@ -90,7 +91,7 @@ defineTool(
 
     const userIds = parseUserIds(args.userIds);
     if (userIds.length === 0) {
-      throw new Error("userIds は 1 件以上必要です。");
+      throw new ToolInputError("userIds は 1 件以上必要です。");
     }
 
     if (action === "remove") {
@@ -117,7 +118,9 @@ defineTool(
     // action === "add"
     const reason = (args.reason as string | undefined)?.trim();
     if (!reason) {
-      throw new Error("add では reason が必須です（owner DM に表示します）。");
+      throw new ToolInputError(
+        "add では reason が必須です（owner DM に表示します）。",
+      );
     }
 
     const requestedBy =

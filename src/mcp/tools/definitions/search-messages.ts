@@ -1,17 +1,14 @@
 import type { Client } from "discord.js";
 import { getPrismaClient } from "../../../db/client.js";
-import { wrapError } from "../../../discord/helpers.js";
 import { isTrustedUser } from "../../../security/trust.js";
 import {
   type FormattableEmbed,
   type FormattableMessage,
   formatMessages,
 } from "../../../shared/format.js";
+import { wrapToolExecutionError } from "../../errors.js";
 import { defineTool, textResult } from "../registry.js";
-import {
-  clampNumberInRange,
-  validateChannelOrGuild,
-} from "../validators.js";
+import { clampNumberInRange, validateChannelOrGuild } from "../validators.js";
 
 // ツールを登録
 defineTool(
@@ -212,7 +209,7 @@ defineTool(
 
       return textResult(formatMessages(sortedMessages));
     } catch (error) {
-      throw wrapError(error, "search messages");
+      throw wrapToolExecutionError(error, "search messages");
     }
   },
 );
