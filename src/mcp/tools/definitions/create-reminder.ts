@@ -5,6 +5,11 @@
 import type { Client } from "discord.js";
 import { getLifecycleController } from "../../../discord/client.js";
 import { defineTool, jsonResult, textResult } from "../registry.js";
+import {
+  validateActionEnum,
+  validateIso8601Date,
+  validateRequiredString,
+} from "../validators.js";
 
 defineTool(
   {
@@ -47,21 +52,15 @@ defineTool(
       );
     }
 
-    const content = args.content as string;
-    const type = args.type as "once" | "cron";
+    const content = validateRequiredString(args.content, "content");
+    const type = validateActionEnum(
+      args.type,
+      ["once", "cron"] as const,
+      "type",
+    );
 
     if (type === "once") {
-      const executeAtStr = args.executeAt as string | undefined;
-      if (!executeAtStr) {
-        return textResult("エラー: type='once' の場合は executeAt が必須です");
-      }
-
-      const executeAt = new Date(executeAtStr);
-      if (Number.isNaN(executeAt.getTime())) {
-        return textResult(
-          "エラー: executeAt の形式が不正です。ISO8601形式で指定してください。",
-        );
-      }
+      const executeAt = validateIso8601Date(args.executeAt, "executeAt");
 
       try {
         const job = await controller.createReminder(content, {
