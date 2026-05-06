@@ -8,6 +8,10 @@ import {
   formatMessages,
 } from "../../../shared/format.js";
 import { defineTool, textResult } from "../registry.js";
+import {
+  clampNumberInRange,
+  validateChannelOrGuild,
+} from "../validators.js";
 
 // ツールを登録
 defineTool(
@@ -66,22 +70,19 @@ defineTool(
     },
   },
   async (_client: Client, args: Record<string, unknown>) => {
-    const channelId = args.channelId as string | undefined;
-    const guildId = args.guildId as string | undefined;
+    const { channelId, guildId } = validateChannelOrGuild(args);
     const query = args.query as string | undefined;
     const authorId = args.authorId as string | undefined;
     const hasLink = args.hasLink as boolean | undefined;
     const hasAttachment = args.hasAttachment as boolean | undefined;
-    const limit = Math.min(Math.max((args.limit as number) || 20, 1), 100);
+    const limit = clampNumberInRange(args.limit, {
+      min: 1,
+      max: 100,
+      default: 20,
+    });
     const sortBy = (args.sortBy as "newest" | "oldest") || "newest";
     const dateFrom = args.dateFrom as string | undefined;
     const dateTo = args.dateTo as string | undefined;
-
-    if (!channelId && !guildId) {
-      return textResult(
-        "エラー: channelId または guildId のいずれかが必要です",
-      );
-    }
 
     try {
       const prisma = getPrismaClient();

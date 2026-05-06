@@ -32,6 +32,7 @@ import {
 } from "../../../security/trust.js";
 import { getLogger } from "../../../shared/logger.js";
 import { defineTool, jsonResult, type ToolResult } from "../registry.js";
+import { validateActionEnum } from "../validators.js";
 import { sendOwnerNotification } from "./notify-owner.js";
 
 const logger = getLogger("manage-trust");
@@ -67,12 +68,11 @@ defineTool(
     client: Client,
     args: Record<string, unknown>,
   ): Promise<ToolResult> => {
-    const action = args.action as string | undefined;
-    if (action !== "list" && action !== "add" && action !== "remove") {
-      throw new Error(
-        `action は list / add / remove のいずれかである必要があります（受信: ${String(action)}）`,
-      );
-    }
+    const action = validateActionEnum(
+      args.action,
+      ["list", "add", "remove"] as const,
+      "action",
+    );
 
     if (action === "list") {
       const entries = await listTrustedUsers();
