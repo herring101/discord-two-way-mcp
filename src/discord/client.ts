@@ -5,6 +5,7 @@ import {
   GatewayIntentBits,
   type Interaction,
   type Message,
+  Partials,
 } from "discord.js";
 import {
   disconnectDatabase,
@@ -62,6 +63,9 @@ export class DiscordClient {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
       ],
+      // DM channel は通常 cache されないため、Partials.Channel がないと
+      // messageCreate イベントが発火しない (Partials.Message も DM の partial 受信に必要)
+      partials: [Partials.Channel, Partials.Message],
     });
 
     // tmuxセッションを検出
