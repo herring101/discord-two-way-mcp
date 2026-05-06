@@ -1,9 +1,12 @@
 /**
  * format.ts の trusted/untrusted ラップ動作テスト。
+ *
+ * trust 判定ロジック自体は呼び出し側責任なので、ここでは
+ * msg.trusted フラグを直接渡して formatMessage の出力を検証する。
+ * isTrustedUser のテストは security/trust.test.ts を参照。
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetTrustCache, setBotUserId } from "../security/trust.js";
+import { describe, expect, test } from "bun:test";
 import { type FormattableMessage, formatMessage } from "./format.js";
 
 const baseMessage: FormattableMessage = {
@@ -19,31 +22,16 @@ const baseMessage: FormattableMessage = {
   timestamp: new Date("2026-05-05T12:34:00Z"),
 };
 
-describe("formatMessage trust 判定", () => {
-  const original = process.env.INITIAL_TRUSTED_USER_IDS;
-
-  beforeEach(() => {
-    resetTrustCache();
-    setBotUserId(null);
-  });
-  afterEach(() => {
-    if (original === undefined) delete process.env.INITIAL_TRUSTED_USER_IDS;
-    else process.env.INITIAL_TRUSTED_USER_IDS = original;
-    resetTrustCache();
-    setBotUserId(null);
-  });
-
-  test("trusted ユーザーは UNTRUSTED 境界が付かない（現状動作維持）", async () => {
-    process.env.INITIAL_TRUSTED_USER_IDS = "user-untrusted";
-    const out = await formatMessage(baseMessage);
+describe("formatMessage trust フラグ動作", () => {
+  test("trusted=true は UNTRUSTED 境界が付かない", () => {
+    const out = formatMessage({ ...baseMessage, trusted: true });
     expect(out).not.toContain("<UNTRUSTED_BEGIN");
     expect(out).not.toContain("<UNTRUSTED_END>");
     expect(out).toContain("hello world");
   });
 
-  test("untrusted ユーザーは body のみが UNTRUSTED 境界で囲まれる", async () => {
-    delete process.env.INITIAL_TRUSTED_USER_IDS;
-    const out = await formatMessage(baseMessage);
+  test("trusted=false は body のみが UNTRUSTED 境界で囲まれる", () => {
+    const out = formatMessage({ ...baseMessage, trusted: false });
     expect(out).toContain(
       '<UNTRUSTED_BEGIN source="discord:user:user-untrusted"',
     );
@@ -57,10 +45,16 @@ describe("formatMessage trust 判定", () => {
     expect(headerIdx).toBeLessThan(beginIdx);
   });
 
-  test("untrusted + 添付/Embed/リアクション → 全て境界内に入る", async () => {
-    delete process.env.INITIAL_TRUSTED_USER_IDS;
-    const out = await formatMessage({
+  test("trusted 未指定はデフォルトで untrusted (安全側) として扱う", () => {
+    const out = formatMessage(baseMessage);
+    expect(out).toContain("<UNTRUSTED_BEGIN");
+    expect(out).toContain("<UNTRUSTED_END>");
+  });
+
+  test("trusted=false + 添付/Embed/リアクション → 全て境界内に入る", () => {
+    const out = formatMessage({
       ...baseMessage,
+      trusted: false,
       attachments: [{ filename: "a.png", parsedContent: "猫の画像" }],
       embeds: [{ title: "リンク先", description: "説明" }],
       reactions: [{ emoji: "👍", count: 2 }],
@@ -76,21 +70,15 @@ describe("formatMessage trust 判定", () => {
     expect(inner).toContain("[👍 2]");
   });
 
-  test("DM (channelName=null) → channel 属性は付かない", async () => {
-    delete process.env.INITIAL_TRUSTED_USER_IDS;
-    const out = await formatMessage({ ...baseMessage, channelName: null });
+  test("DM (channelName=null) trusted=false → channel 属性は付かない", () => {
+    const out = formatMessage({
+      ...baseMessage,
+      channelName: null,
+      trusted: false,
+    });
     expect(out).toContain("[DM]");
     expect(out).toContain("<UNTRUSTED_BEGIN");
     expect(out).not.toContain("channel=");
     expect(out).toContain('username="alice"');
-  });
-
-  test("Bot 自身 (setBotUserId で登録) は trusted、自分の発言にラップが付かない", async () => {
-    delete process.env.INITIAL_TRUSTED_USER_IDS;
-    setBotUserId("user-untrusted"); // baseMessage.author.id を bot として登録
-    const out = await formatMessage(baseMessage);
-    expect(out).not.toContain("<UNTRUSTED_BEGIN");
-    expect(out).not.toContain("<UNTRUSTED_END>");
-    expect(out).toContain("hello world");
   });
 });
