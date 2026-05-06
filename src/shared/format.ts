@@ -1,9 +1,13 @@
 /**
  * メッセージフォーマッタ
  * リアルタイム通知とツール取得で統一したプレーンテキスト形式を提供する
+ *
+ * 注意: trust 判定 (isTrustedUser) は呼び出し側で実施し、結果を
+ * FormattableMessage.trusted にセットして渡すこと。format.ts は
+ * security/ への依存を持たない (HER-80)。
  */
 
-import { isTrustedUser, wrapUntrusted } from "../security/index.js";
+import { wrapUntrusted } from "./untrusted-wrap.js";
 
 /**
  * フォーマット可能なメッセージの型
@@ -44,6 +48,15 @@ export interface FormattableMessage {
   };
   content: string;
   timestamp: Date;
+  /**
+   * 著者が trusted ユーザーか。
+   * trusted=true: body は素のまま LLM へ
+   * trusted=false: body を <UNTRUSTED_BEGIN>...<UNTRUSTED_END> でラップ
+   *
+   * 呼び出し側が `isTrustedUser(author.id)` で判定して必ずセットする。
+   * デフォルト未指定時は安全側 (false = ラップ) として扱う。
+   */
+  trusted?: boolean;
   attachments?: Array<{
     filename: string;
     parsedContent?: string; // 解析成功時の内容
@@ -146,8 +159,10 @@ function formatEmbed(embed: FormattableEmbed): string {
  *
  * untrusted ユーザーのメッセージは body 部分のみ <UNTRUSTED_BEGIN ...> ... <UNTRUSTED_END> で
  * ラップされる（ヘッダーは bot 生成のメタなので素のまま）。
+ *
+ * trust 判定は呼び出し側責任。msg.trusted=true で素のまま、未指定 or false でラップ (安全側)。
  */
-export async function formatMessage(msg: FormattableMessage): Promise<string> {
+export function formatMessage(msg: FormattableMessage): string {
   // チャンネル部分
   const channelPart = msg.channelName
     ? `[#${msg.channelName} (ch:${msg.channelId})]`
@@ -206,9 +221,8 @@ export async function formatMessage(msg: FormattableMessage): Promise<string> {
     body = body ? `${body}\n${reactionLine}` : reactionLine;
   }
 
-  // untrusted ユーザーは body をラップ
-  const trusted = await isTrustedUser(msg.author.id);
-  const finalBody = trusted
+  // 著者が trusted でなければ body をラップ (msg.trusted=true 明示時のみ素通し)
+  const finalBody = msg.trusted
     ? body
     : wrapUntrusted({
         source: `discord:user:${msg.author.id}`,
@@ -228,10 +242,10 @@ export async function formatMessage(msg: FormattableMessage): Promise<string> {
  * @param messages フォーマット対象のメッセージ配列（時系列順を想定）
  * @param initialDate 最初の日付セパレータ判定用の基準日（省略時は最初のメッセージで必ずセパレータを出力）
  */
-export async function formatMessages(
+export function formatMessages(
   messages: FormattableMessage[],
   initialDate?: Date,
-): Promise<string> {
+): string {
   if (messages.length === 0) {
     return "(メッセージなし)";
   }
@@ -246,7 +260,7 @@ export async function formatMessages(
     }
     lastDate = msg.timestamp;
 
-    lines.push(await formatMessage(msg));
+    lines.push(formatMessage(msg));
   }
 
   return lines.join("\n\n");

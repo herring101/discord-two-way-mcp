@@ -10,6 +10,7 @@ import {
   validateAndLimitNumber,
   wrapError,
 } from "../../../discord/helpers.js";
+import { isTrustedUser } from "../../../security/trust.js";
 import { parseAttachment } from "../../../shared/attachment-parser.js";
 import {
   type FormattableMessage,
@@ -137,6 +138,17 @@ defineTool(
         await Promise.allSettled(parsePromises);
       }
 
+      // 各 author の trust 状態を一括解決 (重複排除して isTrustedUser 呼び出し最小化)
+      const uniqueAuthorIds = [
+        ...new Set(messageArray.map((m) => m.author.id)),
+      ];
+      const trustEntries = await Promise.all(
+        uniqueAuthorIds.map(
+          async (id) => [id, await isTrustedUser(id)] as const,
+        ),
+      );
+      const trustMap = new Map(trustEntries);
+
       // FormattableMessage に変換
       const formattableMessages: FormattableMessage[] = messageArray.map(
         (msg) => ({
@@ -150,6 +162,7 @@ defineTool(
           },
           content: msg.content,
           timestamp: msg.createdAt,
+          trusted: trustMap.get(msg.author.id) ?? false,
           attachments: msg.attachments.map((att) => {
             const filename = att.name ?? "unknown";
             const parsedContent = parsedContentMap.get(`${msg.id}_${filename}`);
@@ -185,7 +198,7 @@ defineTool(
         }),
       );
 
-      return textResult(await formatMessages(formattableMessages));
+      return textResult(formatMessages(formattableMessages));
     } catch (error) {
       throw wrapError(error, "fetch messages");
     }

@@ -34,7 +34,9 @@ export {
   setBotUserId,
   type TrustedUserEntry,
 } from "./trust.js";
+// untrusted-wrap は pure formatting なので shared/ に移動済 (HER-80)
+// 後方互換のため security/ からも引き続き re-export
 export {
   type WrapUntrustedOptions,
   wrapUntrusted,
-} from "./untrusted-wrap.js";
+} from "../shared/untrusted-wrap.js";

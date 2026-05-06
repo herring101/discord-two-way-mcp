@@ -22,7 +22,7 @@ import {
   type OutputHandler,
   type UnreadSummaryWithDetails,
 } from "../lifecycle/index.js";
-import { setBotUserId } from "../security/trust.js";
+import { isTrustedUser, setBotUserId } from "../security/trust.js";
 import { parseAttachment } from "../shared/attachment-parser.js";
 import {
   type FormattableMessage,
@@ -411,7 +411,8 @@ export class DiscordClient {
       }
     }
 
-    // FormattableMessage に変換
+    // FormattableMessage に変換 (trust 判定もここで実施し format.ts に渡す)
+    const trusted = await isTrustedUser(message.author.id);
     const formattable: FormattableMessage = {
       id: message.id,
       channelId: message.channelId,
@@ -423,6 +424,7 @@ export class DiscordClient {
       },
       content: message.content,
       timestamp: message.createdAt,
+      trusted,
       attachments: parsedAttachments,
       embeds: message.embeds.map((embed) => ({
         title: embed.title,
@@ -455,7 +457,7 @@ export class DiscordClient {
     this.lastNotifiedDate = message.createdAt;
 
     // メッセージ本体を送信
-    const notification = await formatMessage(formattable);
+    const notification = formatMessage(formattable);
     sendToTmux(this.tmuxSession, notification);
   }
 

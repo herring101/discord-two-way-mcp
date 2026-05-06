@@ -1,6 +1,7 @@
 import type { Client } from "discord.js";
 import { getPrismaClient } from "../../../db/client.js";
 import { wrapError } from "../../../discord/helpers.js";
+import { isTrustedUser } from "../../../security/trust.js";
 import {
   type FormattableEmbed,
   type FormattableMessage,
@@ -117,6 +118,15 @@ defineTool(
         },
       });
 
+      // 各 author の trust 状態を一括解決 (重複排除)
+      const uniqueAuthorIds = [...new Set(messages.map((m) => m.authorId))];
+      const trustEntries = await Promise.all(
+        uniqueAuthorIds.map(
+          async (id) => [id, await isTrustedUser(id)] as const,
+        ),
+      );
+      const trustMap = new Map(trustEntries);
+
       // FormattableMessage に変換
       const formattableMessages: FormattableMessage[] = messages.map((msg) => {
         // DBに保存されたJSON文字列からembedsをパース
@@ -182,6 +192,7 @@ defineTool(
           },
           content: msg.content,
           timestamp: msg.timestamp,
+          trusted: trustMap.get(msg.authorId) ?? false,
           attachments: msg.attachments.map((att) => ({
             filename: att.filename,
             parsedContent: att.parsedContent ?? undefined,
@@ -198,7 +209,7 @@ defineTool(
       const sortedMessages =
         sortBy === "oldest" ? formattableMessages : formattableMessages;
 
-      return textResult(await formatMessages(sortedMessages));
+      return textResult(formatMessages(sortedMessages));
     } catch (error) {
       throw wrapError(error, "search messages");
     }
