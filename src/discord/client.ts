@@ -33,6 +33,7 @@ import { getLogger } from "../shared/logger.js";
 import { getTmuxSession, sendToTmux } from "../shared/tmux.js";
 import { importAllGuildsAsync } from "./import.js";
 import { handleButtonInteraction } from "./interaction-router.js";
+import { isMentionOrReplyToBot } from "./mention.js";
 import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
 
 const logger = getLogger("discord");
@@ -292,33 +293,17 @@ export class DiscordClient {
     const botUser = this.client.user;
     if (!botUser) return false;
 
-    // ユーザーメンションされているか
-    if (message.mentions.users.has(botUser.id)) {
-      return true;
-    }
-
-    // ロールメンションされているか（Botの管理ロールを含む）
-    if (message.guild) {
-      const botMember = message.guild.members.me;
-      if (
-        botMember &&
-        message.mentions.roles.some((role) =>
-          botMember.roles.cache.has(role.id),
-        )
-      ) {
-        return true;
-      }
-    }
-
-    // リプライかどうか（リプライ先のauthorがBot）
-    if (message.reference?.messageId) {
-      // リプライ先のメッセージを取得するのは非同期なので、
-      // ここでは mentions に含まれるかで判定する
-      // Discord.js は reply で自動的に mentions に追加される
-      return message.mentions.repliedUser?.id === botUser.id;
-    }
-
-    return false;
+    const botMember = message.guild?.members.me;
+    return isMentionOrReplyToBot({
+      isDM: !message.guild,
+      botUserId: botUser.id,
+      mentionedUserIds: new Set(message.mentions.users.keys()),
+      botRoleIds: botMember
+        ? new Set(botMember.roles.cache.keys())
+        : new Set<string>(),
+      mentionedRoleIds: new Set(message.mentions.roles.keys()),
+      replyToUserId: message.mentions.repliedUser?.id ?? null,
+    });
   }
 
   /**
