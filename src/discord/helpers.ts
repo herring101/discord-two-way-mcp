@@ -129,13 +129,6 @@ export function filterTextChannels(channels: {
     .sort((a, b) => a.position - b.position);
 }
 
-export function wrapError(error: unknown, action: string): McpError {
-  return new McpError(
-    ErrorCode.InternalError,
-    `Failed to ${action}: ${error instanceof Error ? error.message : String(error)}`,
-  );
-}
-
 export function validateMessageContent(content: string | undefined): string {
   if (!content || content.trim().length === 0) {
     throw new McpError(

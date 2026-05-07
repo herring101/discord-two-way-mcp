@@ -2,7 +2,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { AttachmentBuilder, type Client } from "discord.js";
 import { getLifecycleController } from "../../../discord/client.js";
-import { fetchTextBasedChannel, wrapError } from "../../../discord/helpers.js";
+import { fetchTextBasedChannel } from "../../../discord/helpers.js";
+import { ToolInputError, wrapToolExecutionError } from "../../errors.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録
@@ -39,19 +40,19 @@ defineTool(
       try {
         await fs.access(filePath);
       } catch {
-        throw new Error(`ファイルが見つかりません: ${filePath}`);
+        throw new ToolInputError(`ファイルが見つかりません: ${filePath}`);
       }
 
       // ファイル情報取得
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) {
-        throw new Error(`パスはファイルではありません: ${filePath}`);
+        throw new ToolInputError(`パスはファイルではありません: ${filePath}`);
       }
 
       // ファイルサイズチェック（Discord制限: 25MB）
       const maxFileSize = 25 * 1024 * 1024;
       if (stats.size > maxFileSize) {
-        throw new Error(
+        throw new ToolInputError(
           `ファイルサイズがDiscordの制限(25MB)を超えています: ${Math.round(stats.size / 1024 / 1024)}MB`,
         );
       }
@@ -90,7 +91,7 @@ defineTool(
         timestamp: sentMessage.createdAt.toISOString(),
       });
     } catch (error) {
-      throw wrapError(error, "upload file");
+      throw wrapToolExecutionError(error, "upload file");
     }
   },
 );

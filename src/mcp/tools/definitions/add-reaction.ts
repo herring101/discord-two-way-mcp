@@ -1,6 +1,6 @@
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "discord.js";
-import { fetchTextBasedChannel, wrapError } from "../../../discord/helpers.js";
+import { fetchTextBasedChannel } from "../../../discord/helpers.js";
+import { ToolInputError, wrapToolExecutionError } from "../../errors.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 // ツールを登録
@@ -38,7 +38,7 @@ defineTool(
       const message = await channel.messages.fetch(messageId);
 
       if (!message) {
-        throw new McpError(ErrorCode.InvalidParams, "Message not found");
+        throw new ToolInputError("Message not found");
       }
 
       const reaction = await message.react(emoji);
@@ -49,7 +49,7 @@ defineTool(
         messageId,
       });
     } catch (error) {
-      throw wrapError(error, "add reaction");
+      throw wrapToolExecutionError(error, "add reaction");
     }
   },
 );

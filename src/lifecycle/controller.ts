@@ -4,6 +4,7 @@
  */
 
 import type { PrismaClient } from "../db/generated/prisma/client.js";
+import { ToolInputError } from "../mcp/errors.js";
 import type { Schedule, ScheduledJob } from "../scheduler/index.js";
 import { isPastTime, Scheduler } from "../scheduler/index.js";
 import { getLogger } from "../shared/logger.js";
@@ -382,7 +383,7 @@ export class LifecycleController {
       schedule.type === "once" &&
       isPastTime(schedule.executeAt, new Date())
     ) {
-      throw new Error("過去の時刻にはリマインダーを設定できません");
+      throw new ToolInputError("過去の時刻にはリマインダーを設定できません");
     }
 
     return this.scheduler.addJob({
