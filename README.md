@@ -59,32 +59,11 @@ bunx prisma db push --schema="src/db/prisma/schema.prisma"
 
 ## MCP設定
 
-AIアシスタントの設定ファイルにサーバーを追加します。エントリポイントは 2 種類:
+AIアシスタントの設定ファイルにサーバーを追加します。エントリポイントは `src/index.ts` です。
 
-- **本体直接** (`src/index.ts`): シンプル、再起動には Claude Code 側の `/mcp` 再接続が必要
-- **proxy 経由** (`src/proxy/index.ts`): 推奨。`restart_server` MCP tool で本体だけを再起動でき、Claude 側 MCP 接続は維持される（HER-79）
+`restart_discord_mcp` tool を使うと、現在の bot セッションを外部 supervisor (`launch.sh restart <bot>`) 経由で再起動できます。tool の戻り値には `target`, `mode`, `session`, `character` が含まれるため、何を再起動するかが明示されます。
 
 ### Claude Code (`~/.config/claude/mcp.json`)
-
-proxy 経由（推奨）:
-
-```json
-{
-  "mcpServers": {
-    "discord": {
-      "command": "bun",
-      "args": ["run", "/absolute/path/to/discord-two-way-mcp/src/proxy/index.ts"],
-      "env": {
-        "DISCORD_BOT_TOKEN": "your_bot_token",
-        "GEMINI_API_KEY": "your_gemini_api_key",
-        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>"
-      }
-    }
-  }
-}
-```
-
-本体直接（proxy なし）:
 
 ```json
 {
@@ -94,7 +73,9 @@ proxy 経由（推奨）:
       "args": ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"],
       "env": {
         "DISCORD_BOT_TOKEN": "your_bot_token",
-        "GEMINI_API_KEY": "your_gemini_api_key"
+        "GEMINI_API_KEY": "your_gemini_api_key",
+        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>",
+        "DISCORD_MCP_RESTART_LAUNCH_SH": "/absolute/path/to/agent-workspace/launch.sh"
       }
     }
   }
@@ -109,20 +90,20 @@ web_search_request = true
 
 [mcp_servers.discord-two-way]
 command = "bun"
-# proxy 経由（推奨）。本体だけ使う場合は src/index.ts に変更
-args = ["run", "/absolute/path/to/discord-two-way-mcp/src/proxy/index.ts"]
+args = ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"]
 
 [mcp_servers.discord-two-way.env]
 DISCORD_BOT_TOKEN = "your_bot_token"
 GEMINI_API_KEY = "your_gemini_api_key"
 NOTIFY_TARGET_USER_ID = "<owner Discord user id>"
+DISCORD_MCP_RESTART_LAUNCH_SH = "/absolute/path/to/agent-workspace/launch.sh"
 ```
 
-### proxy 経由で利用できる追加 tool
+### 再起動 tool
 
-| ツール名         | 説明                                                                                                           |
-| ---------------- | -------------------------------------------------------------------------------------------------------------- |
-| `restart_server` | 本体 (Discord MCP child process) を kill → respawn → 再 initialize する。Claude 側 MCP 接続は維持される。      |
+| ツール名              | 説明                                                                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `restart_discord_mcp` | 現在の bot セッションで使っている Discord MCP を反映・復旧するため、外部 supervisor (`launch.sh restart <bot>`) に現在の bot セッション再起動を依頼する。 |
 
 
 ## 利用方法

@@ -13,6 +13,7 @@ import "./definitions/import-guild-messages.js";
 import "./definitions/list-reminders.js";
 import "./definitions/manage-trust.js";
 import "./definitions/notify-owner.js";
+import "./definitions/restart-discord-mcp.js";
 import "./definitions/search-messages.js";
 import "./definitions/send-message.js";
 import "./definitions/set-send-target.js";
