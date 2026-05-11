@@ -160,6 +160,8 @@ export class DiscordClient {
         summary: UnreadSummaryWithDetails[],
       ) => {
         if (!this.tmuxSession && !this.refreshTmuxSession()) return;
+        const tmuxSession = this.tmuxSession;
+        if (!tmuxSession) return;
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
 
         if (summary.length === 0) {
@@ -170,8 +172,8 @@ export class DiscordClient {
           if (now - this.lastWorkCheckMs >= interval) {
             this.lastWorkCheckMs = now;
             sendToTmux(
-              this.tmuxSession,
-              "[WorkCheck] CLAUDE.md に従って行動を開始してください。",
+              tmuxSession,
+              "[WorkCheck] AGENTS.md に従って行動を開始してください。",
             );
           }
           return;
@@ -199,11 +201,13 @@ export class DiscordClient {
           .join(", ");
 
         const message = `[Activity] 過去${duration}分: 新着未読 ${totalUnread}件 (${details})`;
-        sendToTmux(this.tmuxSession, message);
+        sendToTmux(tmuxSession, message);
       },
       sendToAgent: (message: string) => {
         if (!this.tmuxSession && !this.refreshTmuxSession()) return;
-        sendToTmux(this.tmuxSession, message);
+        const tmuxSession = this.tmuxSession;
+        if (!tmuxSession) return;
+        sendToTmux(tmuxSession, message);
       },
     };
 
@@ -361,6 +365,8 @@ export class DiscordClient {
     }>,
   ): Promise<void> {
     if (!this.tmuxSession && !this.refreshTmuxSession()) return;
+    const tmuxSession = this.tmuxSession;
+    if (!tmuxSession) return;
 
     // チャンネル名を取得
     const channelName =
@@ -452,13 +458,13 @@ export class DiscordClient {
       !this.lastNotifiedDate ||
       !isSameDay(this.lastNotifiedDate, message.createdAt)
     ) {
-      sendToTmux(this.tmuxSession, formatDateSeparator(message.createdAt));
+      sendToTmux(tmuxSession, formatDateSeparator(message.createdAt));
     }
     this.lastNotifiedDate = message.createdAt;
 
     // メッセージ本体を送信
     const notification = formatMessage(formattable);
-    sendToTmux(this.tmuxSession, notification);
+    sendToTmux(tmuxSession, notification);
   }
 
   async connect(): Promise<void> {

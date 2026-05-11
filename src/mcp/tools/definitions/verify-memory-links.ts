@@ -1,6 +1,6 @@
 /**
  * メモリリンク検証ツール
- * CLAUDE.md と docs/ 内の .md ファイルのリンク整合性を検証する
+ * AGENTS.md / CLAUDE.md と docs/ 内の .md ファイルのリンク整合性を検証する
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -58,7 +58,7 @@ defineTool(
   {
     name: "verify_memory_links",
     description:
-      "CLAUDE.md と docs/ 以下の .md ファイルのリンク整合性を検証します。リンク切れと孤立ドキュメントを検出します。成功時は60秒後に /compact を実行します。",
+      "AGENTS.md / CLAUDE.md と docs/ 以下の .md ファイルのリンク整合性を検証します。CLAUDE.md が @AGENTS.md wrapper になっていること、リンク切れ、孤立ドキュメントを検出します。成功時は60秒後に /compact を実行します。",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,16 +81,32 @@ defineTool(
     }
 
     const baseDir = process.cwd();
+    const agentsMdPath = join(baseDir, "AGENTS.md");
     const claudeMdPath = join(baseDir, "CLAUDE.md");
     const docsDir = join(baseDir, "docs");
 
-    // CLAUDE.md の存在確認
+    // AGENTS.md / CLAUDE.md の存在確認
+    if (!existsSync(agentsMdPath)) {
+      return textResult("メモリリンク検証失敗\nAGENTS.md が見つかりません。");
+    }
     if (!existsSync(claudeMdPath)) {
       return textResult("メモリリンク検証失敗\nCLAUDE.md が見つかりません。");
     }
 
+    const claudeContent = readFileSync(claudeMdPath, "utf-8");
+    const firstMeaningfulLine =
+      claudeContent
+        .split("\n")
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? "";
+    if (firstMeaningfulLine !== "@AGENTS.md") {
+      return textResult(
+        "メモリリンク検証失敗\nCLAUDE.md の最初の非空行が @AGENTS.md ではありません。",
+      );
+    }
+
     // 検証対象ファイルの収集
-    const filesToCheck: string[] = [claudeMdPath];
+    const filesToCheck: string[] = [agentsMdPath, claudeMdPath];
     const docsFiles = findMdFiles(docsDir);
     filesToCheck.push(...docsFiles);
 

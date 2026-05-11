@@ -300,9 +300,9 @@ describe("Scheduler", () => {
       await advanceTimersByTime(1000);
       expect(handler).toHaveBeenCalledTimes(1);
 
-      // ジョブが無効化されている
+      // 実行済み once ジョブは一覧から削除される
       const updatedJob = scheduler.listJobs().find((j) => j.id === job.id);
-      expect(updatedJob?.enabled).toBe(false);
+      expect(updatedJob).toBeUndefined();
     });
 
     test("無効化されたジョブは実行されない", async () => {

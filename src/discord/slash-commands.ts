@@ -214,6 +214,7 @@ async function handleRemindersCommand(
 
   for (let i = 0; i < reminders.length; i++) {
     const job = reminders[i];
+    if (!job) continue;
     const content =
       job.payload.type === "reminder" ? job.payload.content : "(不明)";
     const nextRun = job.nextRunAt

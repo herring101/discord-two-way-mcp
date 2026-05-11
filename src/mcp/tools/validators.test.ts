@@ -2,8 +2,8 @@
  * MCP tool 入力検証バリデータ (validators.ts) のテスト。
  */
 
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, test } from "bun:test";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   clampNumberInRange,
   validateActionEnum,
@@ -20,9 +20,9 @@ describe("validateActionEnum", () => {
   });
 
   test("許可外の値で McpError", () => {
-    expect(() =>
-      validateActionEnum("foo", ["add", "remove"] as const),
-    ).toThrow(McpError);
+    expect(() => validateActionEnum("foo", ["add", "remove"] as const)).toThrow(
+      McpError,
+    );
   });
 
   test("undefined で McpError", () => {
@@ -93,9 +93,10 @@ describe("validateChannelOrGuild", () => {
   });
 
   test("両方ありで OK", () => {
-    expect(
-      validateChannelOrGuild({ channelId: "c1", guildId: "g1" }),
-    ).toEqual({ channelId: "c1", guildId: "g1" });
+    expect(validateChannelOrGuild({ channelId: "c1", guildId: "g1" })).toEqual({
+      channelId: "c1",
+      guildId: "g1",
+    });
   });
 
   test("両方なしで McpError", () => {
@@ -150,9 +151,7 @@ describe("validateIso8601Date", () => {
   });
 
   test("undefined で McpError", () => {
-    expect(() => validateIso8601Date(undefined, "executeAt")).toThrow(
-      McpError,
-    );
+    expect(() => validateIso8601Date(undefined, "executeAt")).toThrow(McpError);
   });
 });
 

@@ -64,8 +64,9 @@ defineTool(
       if (controller) {
         await controller.setFocusChannel(channelId);
         // 最新メッセージIDで既読化
-        if (messageArray.length > 0) {
-          const latestMessageId = messageArray[messageArray.length - 1].id;
+        const latestMessage = messageArray.at(-1);
+        if (latestMessage) {
+          const latestMessageId = latestMessage.id;
           await controller.onChannelMessagesRead(channelId, latestMessageId);
         }
       }

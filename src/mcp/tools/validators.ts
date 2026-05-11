@@ -89,7 +89,8 @@ export function clampNumberInRange(
   options: { min: number; max: number; default: number },
 ): number {
   const { min, max, default: defaultValue } = options;
-  const num = typeof value === "number" && !Number.isNaN(value) ? value : defaultValue;
+  const num =
+    typeof value === "number" && !Number.isNaN(value) ? value : defaultValue;
   return Math.min(Math.max(num, min), max);
 }
 
@@ -123,7 +124,5 @@ export function validateStringArray(
       `${fieldName} は文字列配列で指定してください（受信: ${typeof value}）`,
     );
   }
-  return value.map((v, i) =>
-    validateRequiredString(v, `${fieldName}[${i}]`),
-  );
+  return value.map((v, i) => validateRequiredString(v, `${fieldName}[${i}]`));
 }

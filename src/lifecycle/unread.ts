@@ -4,11 +4,7 @@
  */
 
 import type { PrismaClient } from "../db/generated/prisma/client.js";
-import type {
-  ChannelId,
-  MessageId,
-  UnreadSummaryWithDetails,
-} from "./types.js";
+import type { ChannelId, MessageId } from "./types.js";
 
 /**
  * 未読サマリー
