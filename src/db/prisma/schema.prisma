@@ -180,7 +180,7 @@ model PendingTrustRequest {
   id          String    @id @default(cuid())
   userIds     String                 // JSON 配列（複数 userId を 1 リクエストに束ねる）
   reason      String
-  requestedBy String                 // 通常 "clamane"
+  requestedBy String                 // リクエスト元 bot 名
   dmMessageId String?                // 承認 DM のメッセージ ID
   createdAt   DateTime  @default(now())
   resolvedAt  DateTime?

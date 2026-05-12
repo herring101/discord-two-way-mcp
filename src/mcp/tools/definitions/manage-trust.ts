@@ -7,6 +7,7 @@
  * - remove: TrustedUser テーブルから即削除、notify_owner で透明性報告
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -14,7 +15,6 @@ import {
   ButtonStyle,
   type Client,
 } from "discord.js";
-import { getLifecycleController } from "../../../discord/client.js";
 import { resolveOwnerDM } from "../../../discord/dm-resolver.js";
 import { registerButtonHandler } from "../../../discord/interaction-router.js";
 import { getOwnerConfig } from "../../../security/config.js";
@@ -33,6 +33,7 @@ import {
 import { getLogger } from "../../../shared/logger.js";
 import { ToolInputError } from "../../errors.js";
 import { defineTool, jsonResult, type ToolResult } from "../registry.js";
+import { resolveRestartTarget } from "../restart-discord-mcp-core.js";
 import { validateActionEnum } from "../validators.js";
 import { sendOwnerNotification } from "./notify-owner.js";
 
@@ -123,8 +124,7 @@ defineTool(
       );
     }
 
-    const requestedBy =
-      getLifecycleController() !== null ? "clamane" : "unknown";
+    const requestedBy = resolveRequestedBy();
     const pending = await createPendingTrustRequest({
       userIds,
       reason,
@@ -201,6 +201,16 @@ function parseUserIds(value: unknown): string[] {
     .filter((v): v is string => typeof v === "string")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+function resolveRequestedBy(): string {
+  const target = resolveRestartTarget({
+    env: process.env,
+    readFile: (path) => readFileSync(path, "utf-8"),
+    exists: existsSync,
+  });
+
+  return "error" in target ? "unknown" : target.characterName;
 }
 
 // ============================================================
