@@ -15,6 +15,19 @@ import type {
 } from "./types.js";
 
 const logger = getLogger("scheduler");
+const MAX_SET_TIMEOUT_MS = 2_147_483_647;
+
+function getDelayMs(runAt: Date): number {
+  return Math.max(0, runAt.getTime() - Date.now());
+}
+
+function clampTimerDelay(delayMs: number): number {
+  return Math.min(delayMs, MAX_SET_TIMEOUT_MS);
+}
+
+function isDue(runAt: Date): boolean {
+  return getDelayMs(runAt) === 0;
+}
 
 /**
  * スケジュールを JSON 文字列にシリアライズ
@@ -324,17 +337,17 @@ export class Scheduler {
     // 既存のタイマーをクリア
     this.clearTimer(job.id);
 
-    const delay = Math.max(0, job.nextRunAt.getTime() - Date.now());
+    const timerDelay = clampTimerDelay(getDelayMs(job.nextRunAt));
 
     const timer = setTimeout(() => {
       this.executeJob(job.id).catch((error) => {
         logger.error(`[Scheduler] Failed to execute job ${job.name}:`, error);
       });
-    }, delay);
+    }, timerDelay);
 
     this.timers.set(job.id, timer);
     logger.debug(
-      `[Scheduler] Scheduled ${job.name} in ${Math.round(delay / 1000)}s`,
+      `[Scheduler] Scheduled ${job.name} in ${Math.round(timerDelay / 1000)}s`,
     );
   }
 
@@ -352,6 +365,15 @@ export class Scheduler {
       return;
     }
 
+    const dueAt = job.nextRunAt;
+    if (!dueAt) {
+      return;
+    }
+    if (!isDue(dueAt)) {
+      this.scheduleTimer(job);
+      return;
+    }
+
     const handler = this.handlers.get(job.payload.type);
     if (!handler) {
       logger.warn(
@@ -362,34 +384,50 @@ export class Scheduler {
 
     logger.debug(`[Scheduler] Executing job: ${job.name}`);
 
+    const now = new Date();
+    const isRepeating = isRepeatingSchedule(job.schedule);
+    const nextRunAt = isRepeating
+      ? computeNextRunAt(job.schedule, now, now)
+      : null;
+
+    const claim = await this.prisma.scheduledJob.updateMany({
+      where: {
+        id: jobId,
+        enabled: true,
+        nextRunAt: dueAt,
+      },
+      data: {
+        lastRunAt: now,
+        nextRunAt,
+        enabled: isRepeating,
+      },
+    });
+
+    if (claim.count !== 1) {
+      logger.debug(`[Scheduler] Skipped already-claimed job: ${job.name}`);
+      return;
+    }
+
+    job.lastRunAt = now;
+    job.nextRunAt = nextRunAt;
+    job.enabled = isRepeating;
+
     try {
       await handler(job);
     } catch (error) {
       logger.error(`[Scheduler] Handler error for ${job.name}:`, error);
     }
 
-    // lastRunAt を更新
-    const now = new Date();
-    job.lastRunAt = now;
-
-    await this.prisma.scheduledJob.update({
-      where: { id: jobId },
-      data: { lastRunAt: now },
-    });
-
     // 繰り返しスケジュールなら次回を計算
-    if (isRepeatingSchedule(job.schedule)) {
-      const nextRunAt = computeNextRunAt(job.schedule, now, now);
+    if (isRepeating) {
       if (nextRunAt) {
-        job.nextRunAt = nextRunAt;
-        await this.updateNextRunAt(jobId, nextRunAt);
         this.scheduleTimer(job);
       }
     } else {
       // once ジョブはメモリから削除し、DBも削除
       this.clearTimer(jobId);
       this.jobs.delete(jobId);
-      await this.prisma.scheduledJob.delete({
+      await this.prisma.scheduledJob.deleteMany({
         where: { id: jobId },
       });
       logger.debug(`[Scheduler] Removed completed once job: ${job.name}`);

@@ -20,11 +20,13 @@ let currentTime: number;
 // オリジナルの setTimeout/clearTimeout を保存
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
+const originalDateNow = Date.now;
 
 function setupTimerMocks(): void {
   timers = new Map();
   timerIdCounter = 0;
   currentTime = Date.now();
+  Date.now = () => currentTime;
 
   // setTimeout をモック
   globalThis.setTimeout = ((callback: () => void, delay: number) => {
@@ -42,6 +44,7 @@ function setupTimerMocks(): void {
 function restoreTimerMocks(): void {
   globalThis.setTimeout = originalSetTimeout;
   globalThis.clearTimeout = originalClearTimeout;
+  Date.now = originalDateNow;
 }
 
 // 時間を進めて期限切れタイマーを実行
@@ -106,14 +109,52 @@ function createMockPrisma() {
           return job;
         },
       ),
+      updateMany: mock(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id?: string; enabled?: boolean; nextRunAt?: Date | null };
+          data: Record<string, unknown>;
+        }) => {
+          let count = 0;
+          for (const [id, job] of jobs) {
+            const idMatches = where.id === undefined || where.id === id;
+            const enabledMatches =
+              where.enabled === undefined || where.enabled === job.enabled;
+            const nextRunAtMatches =
+              where.nextRunAt === undefined
+                ? true
+                : job.nextRunAt instanceof Date &&
+                    where.nextRunAt instanceof Date
+                  ? job.nextRunAt.getTime() === where.nextRunAt.getTime()
+                  : job.nextRunAt === where.nextRunAt;
+
+            if (idMatches && enabledMatches && nextRunAtMatches) {
+              Object.assign(job, data, { updatedAt: new Date() });
+              count++;
+            }
+          }
+          return { count };
+        },
+      ),
       delete: mock(async ({ where }: { where: { id: string } }) => {
         const job = jobs.get(where.id);
         jobs.delete(where.id);
         return job;
       }),
+      deleteMany: mock(async ({ where }: { where: { id: string } }) => {
+        const existed = jobs.delete(where.id);
+        return { count: existed ? 1 : 0 };
+      }),
     },
     _jobs: jobs, // テスト用にアクセス可能に
   };
+}
+
+interface SchedulerTestAccess {
+  jobs: Map<string, ScheduledJob>;
+  scheduleTimer(job: ScheduledJob): void;
 }
 
 // ============================================================
@@ -269,15 +310,15 @@ describe("Scheduler", () => {
       });
 
       // 1回目
-      await advanceTimersByTime(100);
+      await advanceTimersByTime(150);
       expect(handler).toHaveBeenCalledTimes(1);
 
       // 2回目
-      await advanceTimersByTime(100);
+      await advanceTimersByTime(150);
       expect(handler).toHaveBeenCalledTimes(2);
 
       // 3回目
-      await advanceTimersByTime(100);
+      await advanceTimersByTime(150);
       expect(handler).toHaveBeenCalledTimes(3);
     });
 
@@ -321,6 +362,65 @@ describe("Scheduler", () => {
       await scheduler.setJobEnabled(job.id, false);
 
       await advanceTimersByTime(150);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    test("同じDBジョブを複数schedulerが持っても1回だけ実行される", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const secondScheduler = new Scheduler(mockPrisma as any);
+      const handler = mock(async (_job: ScheduledJob) => {});
+      const dueAt = new Date(currentTime + 100);
+      const job: ScheduledJob = {
+        id: "shared-reminder",
+        name: "reminder:shared",
+        schedule: { type: "cron", cronExpression: "15 9 15 * *" },
+        payload: { type: "reminder", content: "月記念日" },
+        enabled: true,
+        createdAt: new Date(currentTime),
+        lastRunAt: null,
+        nextRunAt: dueAt,
+      };
+
+      mockPrisma._jobs.set(job.id, {
+        ...job,
+        scheduleType: "cron",
+        scheduleData: JSON.stringify({ cronExpression: "15 9 15 * *" }),
+        payloadType: "reminder",
+        payloadData: JSON.stringify({ content: "月記念日" }),
+      });
+
+      scheduler.registerHandler("reminder", handler);
+      secondScheduler.registerHandler("reminder", handler);
+
+      const firstAccess = scheduler as unknown as SchedulerTestAccess;
+      const secondAccess = secondScheduler as unknown as SchedulerTestAccess;
+      firstAccess.jobs.set(job.id, { ...job });
+      secondAccess.jobs.set(job.id, { ...job });
+      firstAccess.scheduleTimer(firstAccess.jobs.get(job.id) as ScheduledJob);
+      secondAccess.scheduleTimer(secondAccess.jobs.get(job.id) as ScheduledJob);
+
+      await advanceTimersByTime(100);
+      secondScheduler.cleanup();
+
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    test("setTimeout 上限を超える未来ジョブは即実行されない", async () => {
+      const handler = mock(async (_job: ScheduledJob) => {});
+
+      scheduler.registerHandler("reminder", handler);
+
+      await scheduler.addJob({
+        name: "monthly-reminder",
+        schedule: {
+          type: "once",
+          executeAt: new Date(currentTime + 31 * 24 * 60 * 60 * 1000),
+        },
+        payload: { type: "reminder", content: "来月" },
+        enabled: true,
+      });
+
+      await advanceTimersByTime(1);
       expect(handler).not.toHaveBeenCalled();
     });
   });
