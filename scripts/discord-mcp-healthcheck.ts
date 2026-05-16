@@ -18,7 +18,7 @@ interface EnabledJobRow {
   nextRunAt: string | null;
 }
 
-interface RiskyReminder {
+interface LongHorizonJob {
   botId: string;
   id: string;
   name: string;
@@ -33,7 +33,7 @@ interface BotSummary {
   dbFile: string;
   enabledJobs: number;
   enabledReminders: number;
-  riskyFutureJobs: RiskyReminder[];
+  longHorizonJobs: LongHorizonJob[];
   error?: string;
 }
 
@@ -43,7 +43,7 @@ interface HealthcheckSummary {
   botCount: number;
   enabledJobs: number;
   enabledReminders: number;
-  riskyFutureJobs: RiskyReminder[];
+  longHorizonJobs: LongHorizonJob[];
   recentTimeoutOverflow: number;
   recentTmuxSendFailures: number;
   botSummaries: BotSummary[];
@@ -104,7 +104,7 @@ function summarizeBotDb(dbFile: string): BotSummary {
       .all() as EnabledJobRow[];
 
     const now = Date.now();
-    const riskyFutureJobs = enabledRows.flatMap((row) => {
+    const longHorizonJobs = enabledRows.flatMap((row) => {
       if (!row.nextRunAt) {
         return [];
       }
@@ -139,7 +139,7 @@ function summarizeBotDb(dbFile: string): BotSummary {
       enabledReminders: enabledRows.filter(
         (row) => row.payloadType === "reminder",
       ).length,
-      riskyFutureJobs,
+      longHorizonJobs,
     };
   } catch (error) {
     return {
@@ -147,7 +147,7 @@ function summarizeBotDb(dbFile: string): BotSummary {
       dbFile,
       enabledJobs: 0,
       enabledReminders: 0,
-      riskyFutureJobs: [],
+      longHorizonJobs: [],
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
@@ -190,7 +190,7 @@ function countRecentLogMatches(
 
 function buildSummary(recentHours: number): HealthcheckSummary {
   const botSummaries = findBotDbs().map(summarizeBotDb);
-  const riskyFutureJobs = botSummaries.flatMap((bot) => bot.riskyFutureJobs);
+  const longHorizonJobs = botSummaries.flatMap((bot) => bot.longHorizonJobs);
   const cutoffMs = recentCutoffMs(recentHours);
   const combinedLogs = `${readLogText("app.log")}\n${readLogText("error.log")}`;
 
@@ -203,7 +203,7 @@ function buildSummary(recentHours: number): HealthcheckSummary {
       (sum, bot) => sum + bot.enabledReminders,
       0,
     ),
-    riskyFutureJobs,
+    longHorizonJobs,
     recentTimeoutOverflow: countRecentLogMatches(
       combinedLogs,
       /TimeoutOverflow/i,
@@ -235,7 +235,7 @@ function formatMarkdown(summary: HealthcheckSummary): string {
     `- Bot DBs: ${summary.botCount}`,
     `- Enabled jobs: ${summary.enabledJobs}`,
     `- Enabled reminders: ${summary.enabledReminders}`,
-    `- Future jobs over setTimeout max: ${summary.riskyFutureJobs.length}`,
+    `- Long-horizon jobs over setTimeout max: ${summary.longHorizonJobs.length}`,
     `- Recent TimeoutOverflow: ${summary.recentTimeoutOverflow}`,
     `- Recent tmux send failures: ${summary.recentTmuxSendFailures}`,
     "",
@@ -245,15 +245,21 @@ function formatMarkdown(summary: HealthcheckSummary): string {
 
   for (const bot of summary.botSummaries) {
     lines.push(
-      `- ${bot.botId}: jobs=${bot.enabledJobs}, reminders=${bot.enabledReminders}, risky=${bot.riskyFutureJobs.length}${
+      `- ${bot.botId}: jobs=${bot.enabledJobs}, reminders=${bot.enabledReminders}, longHorizon=${bot.longHorizonJobs.length}${
         bot.error ? `, error=${bot.error}` : ""
       }`,
     );
   }
 
-  if (summary.riskyFutureJobs.length > 0) {
-    lines.push("", "## Risky Future Jobs", "");
-    for (const job of summary.riskyFutureJobs) {
+  if (summary.longHorizonJobs.length > 0) {
+    lines.push(
+      "",
+      "## Long-Horizon Jobs",
+      "",
+      "These jobs are farther out than one native setTimeout window. The scheduler should wake at the max timer delay, re-check due time, and reschedule instead of executing early.",
+      "",
+    );
+    for (const job of summary.longHorizonJobs) {
       lines.push(
         `- ${job.botId} ${job.name} (${job.id}): nextRunAt=${job.nextRunAt}, delay=${formatDuration(job.delayMs)}`,
       );
