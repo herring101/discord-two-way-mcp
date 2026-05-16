@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/index.ts",
+    "healthcheck": "bun run scripts/discord-mcp-healthcheck.ts",
     "lint": "bunx biome check src/",
     "format": "bunx biome check --write src/",
     "typecheck": "tsc --noEmit"
