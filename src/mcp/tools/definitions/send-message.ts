@@ -4,6 +4,7 @@ import {
   fetchTextBasedChannel,
   validateMessageContent,
 } from "../../../discord/helpers.js";
+import { appendTraceEvent } from "../../../shared/trace-audit.js";
 import {
   ToolInputError,
   ToolPreconditionError,
@@ -89,6 +90,14 @@ defineTool(
       }
 
       clearSendTarget();
+      appendTraceEvent({
+        event: "send_message",
+        channelId: target.channelId,
+        replyToMessageId: target.replyToMessageId ?? null,
+        messageId: sentMessage.id,
+        contentPreview: content,
+        success: true,
+      });
 
       return jsonResult({
         success: true,
@@ -100,6 +109,14 @@ defineTool(
         timestamp: sentMessage.createdAt.toISOString(),
       });
     } catch (error) {
+      appendTraceEvent({
+        event: "send_message",
+        channelId: target.channelId,
+        replyToMessageId: target.replyToMessageId ?? null,
+        contentPreview: content,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
       clearSendTarget();
       throw wrapToolExecutionError(error, "send message");
     }

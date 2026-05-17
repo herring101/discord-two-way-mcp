@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { AttachmentBuilder, type Client } from "discord.js";
 import { getLifecycleController } from "../../../discord/client.js";
 import { fetchTextBasedChannel } from "../../../discord/helpers.js";
+import { appendTraceEvent } from "../../../shared/trace-audit.js";
 import { ToolInputError, wrapToolExecutionError } from "../../errors.js";
 import { defineTool, jsonResult } from "../registry.js";
 
@@ -81,6 +82,16 @@ defineTool(
 
       const uploadedAttachment = sentMessage.attachments.first();
 
+      appendTraceEvent({
+        event: "upload_file",
+        channelId,
+        messageId: sentMessage.id,
+        fileName,
+        fileSize: stats.size,
+        contentPreview: message,
+        success: true,
+      });
+
       return jsonResult({
         success: true,
         messageId: sentMessage.id,
@@ -91,6 +102,14 @@ defineTool(
         timestamp: sentMessage.createdAt.toISOString(),
       });
     } catch (error) {
+      appendTraceEvent({
+        event: "upload_file",
+        channelId,
+        fileName: path.basename(filePath),
+        contentPreview: message,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw wrapToolExecutionError(error, "upload file");
     }
   },

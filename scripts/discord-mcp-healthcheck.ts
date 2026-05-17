@@ -7,8 +7,10 @@ import { basename, join } from "node:path";
 const ROOT_DIR = join(import.meta.dirname, "..");
 const DB_DIR = join(ROOT_DIR, "data/db");
 const LOG_DIR = join(ROOT_DIR, "data/logs");
+const TRACE_FILE = join(ROOT_DIR, "data/mcp-trace-events.jsonl");
 const MAX_SET_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_RECENT_HOURS = 24;
+const INCOMPLETE_TARGET_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface EnabledJobRow {
   id: string;
@@ -46,7 +48,36 @@ interface HealthcheckSummary {
   longHorizonJobs: LongHorizonJob[];
   recentTimeoutOverflow: number;
   recentTmuxSendFailures: number;
+  traceSummary: TraceSummary;
   botSummaries: BotSummary[];
+}
+
+interface TraceEventRow {
+  ts?: string;
+  event?: string;
+  session?: string | null;
+  traceId?: string;
+  channelId?: string;
+  replyToMessageId?: string | null;
+  messageId?: string;
+  success?: boolean;
+  error?: string | null;
+}
+
+interface TraceSummary {
+  recentEvents: number;
+  setTargets: number;
+  completedTargets: number;
+  incompleteTargets: IncompleteTarget[];
+  failedEvents: number;
+}
+
+interface IncompleteTarget {
+  ts: string;
+  session: string | null;
+  channelId: string;
+  replyToMessageId: string | null;
+  ageMinutes: number;
 }
 
 function recentCutoffMs(hours: number): number {
@@ -188,11 +219,106 @@ function countRecentLogMatches(
   return count;
 }
 
+function readRecentTraceEvents(cutoffMs: number): TraceEventRow[] {
+  if (!existsSync(TRACE_FILE)) {
+    return [];
+  }
+
+  const rows: TraceEventRow[] = [];
+  const text = readFileSync(TRACE_FILE, "utf8").replaceAll("\0", "");
+  for (const line of text.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    try {
+      const row = JSON.parse(line) as TraceEventRow;
+      const timestampMs = row.ts ? new Date(row.ts).getTime() : Number.NaN;
+      if (Number.isFinite(timestampMs) && timestampMs >= cutoffMs) {
+        rows.push(row);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return rows;
+}
+
+function eventKey(event: TraceEventRow): string {
+  return [
+    event.session ?? "no-session",
+    event.channelId ?? "no-channel",
+    event.replyToMessageId ?? "no-reply",
+  ].join("|");
+}
+
+function summarizeTraceEvents(
+  events: TraceEventRow[],
+  nowMs = Date.now(),
+): TraceSummary {
+  const setTargets = events.filter(
+    (event) => event.event === "set_send_target" && event.success !== false,
+  );
+  const completions = new Map<string, TraceEventRow[]>();
+
+  for (const event of events) {
+    if (
+      event.event === "send_message" ||
+      event.event === "upload_file" ||
+      event.event === "clear_send_target"
+    ) {
+      const key = eventKey(event);
+      completions.set(key, [...(completions.get(key) ?? []), event]);
+    }
+  }
+
+  let completedTargets = 0;
+  const incompleteTargets: IncompleteTarget[] = [];
+  for (const target of setTargets) {
+    const targetMs = target.ts ? new Date(target.ts).getTime() : Number.NaN;
+    if (!Number.isFinite(targetMs)) {
+      continue;
+    }
+
+    const matchingCompletion = (completions.get(eventKey(target)) ?? []).find(
+      (event) => {
+        const eventMs = event.ts ? new Date(event.ts).getTime() : Number.NaN;
+        return Number.isFinite(eventMs) && eventMs >= targetMs;
+      },
+    );
+
+    if (matchingCompletion) {
+      completedTargets += 1;
+      continue;
+    }
+
+    const ageMs = nowMs - targetMs;
+    if (ageMs >= INCOMPLETE_TARGET_TIMEOUT_MS) {
+      incompleteTargets.push({
+        ts: target.ts ?? "",
+        session: target.session ?? null,
+        channelId: target.channelId ?? "",
+        replyToMessageId: target.replyToMessageId ?? null,
+        ageMinutes: Math.round(ageMs / 60_000),
+      });
+    }
+  }
+
+  return {
+    recentEvents: events.length,
+    setTargets: setTargets.length,
+    completedTargets,
+    incompleteTargets,
+    failedEvents: events.filter((event) => event.success === false).length,
+  };
+}
+
 function buildSummary(recentHours: number): HealthcheckSummary {
   const botSummaries = findBotDbs().map(summarizeBotDb);
   const longHorizonJobs = botSummaries.flatMap((bot) => bot.longHorizonJobs);
   const cutoffMs = recentCutoffMs(recentHours);
   const combinedLogs = `${readLogText("app.log")}\n${readLogText("error.log")}`;
+  const recentTraceEvents = readRecentTraceEvents(cutoffMs);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -214,6 +340,7 @@ function buildSummary(recentHours: number): HealthcheckSummary {
       /Failed to send message to tmux/i,
       cutoffMs,
     ),
+    traceSummary: summarizeTraceEvents(recentTraceEvents),
     botSummaries,
   };
 }
@@ -238,6 +365,10 @@ function formatMarkdown(summary: HealthcheckSummary): string {
     `- Long-horizon jobs over setTimeout max: ${summary.longHorizonJobs.length}`,
     `- Recent TimeoutOverflow: ${summary.recentTimeoutOverflow}`,
     `- Recent tmux send failures: ${summary.recentTmuxSendFailures}`,
+    `- Recent trace events: ${summary.traceSummary.recentEvents}`,
+    `- Recent send target completions: ${summary.traceSummary.completedTargets}/${summary.traceSummary.setTargets}`,
+    `- Recent incomplete targets: ${summary.traceSummary.incompleteTargets.length}`,
+    `- Recent failed trace events: ${summary.traceSummary.failedEvents}`,
     "",
     "## Bot DBs",
     "",
@@ -266,6 +397,15 @@ function formatMarkdown(summary: HealthcheckSummary): string {
       if (job.content) {
         lines.push(`  content=${job.content.slice(0, 120)}`);
       }
+    }
+  }
+
+  if (summary.traceSummary.incompleteTargets.length > 0) {
+    lines.push("", "## Incomplete Send Targets", "");
+    for (const target of summary.traceSummary.incompleteTargets) {
+      lines.push(
+        `- ${target.ts} session=${target.session ?? "unknown"} channel=${target.channelId} reply=${target.replyToMessageId ?? "none"} age=${target.ageMinutes}m`,
+      );
     }
   }
 

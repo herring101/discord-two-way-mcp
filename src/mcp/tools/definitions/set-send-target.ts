@@ -1,6 +1,7 @@
 import type { Client } from "discord.js";
+import { appendTraceEvent } from "../../../shared/trace-audit.js";
 import { wrapToolExecutionError } from "../../errors.js";
-import { setSendTarget } from "../../state/send-target.js";
+import { getSendTarget, setSendTarget } from "../../state/send-target.js";
 import { defineTool, jsonResult } from "../registry.js";
 
 defineTool(
@@ -28,7 +29,22 @@ defineTool(
     const replyToMessageId = args.replyToMessageId as string | undefined;
 
     try {
+      const previous = getSendTarget();
       await setSendTarget(client, { channelId, replyToMessageId });
+      if (previous) {
+        appendTraceEvent({
+          event: "clear_send_target",
+          channelId: previous.channelId,
+          replyToMessageId: previous.replyToMessageId ?? null,
+          success: true,
+        });
+      }
+      appendTraceEvent({
+        event: "set_send_target",
+        channelId,
+        replyToMessageId: replyToMessageId ?? null,
+        success: true,
+      });
       return jsonResult({
         success: true,
         channelId,
@@ -36,6 +52,13 @@ defineTool(
         typing: "active",
       });
     } catch (error) {
+      appendTraceEvent({
+        event: "set_send_target",
+        channelId,
+        replyToMessageId: replyToMessageId ?? null,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw wrapToolExecutionError(error, "set send target");
     }
   },
