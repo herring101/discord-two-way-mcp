@@ -4,7 +4,8 @@ import { getLogger } from "./logger.js";
 import { getTmuxSession } from "./tmux.js";
 
 const logger = getLogger("trace-audit");
-const TRACE_FILE = join(process.cwd(), "data/mcp-trace-events.jsonl");
+const ROOT_DIR = join(import.meta.dirname, "../..");
+const TRACE_FILE = join(ROOT_DIR, "data/mcp-trace-events.jsonl");
 const PREVIEW_LIMIT = 200;
 
 export type TraceEventName =
@@ -44,7 +45,7 @@ function makeTraceId(event: TraceAuditEvent): string {
 
 export function appendTraceEvent(event: TraceAuditEvent): void {
   try {
-    mkdirSync(join(process.cwd(), "data"), { recursive: true });
+    mkdirSync(join(ROOT_DIR, "data"), { recursive: true });
     const record = {
       ts: new Date().toISOString(),
       session: getTmuxSession(),
