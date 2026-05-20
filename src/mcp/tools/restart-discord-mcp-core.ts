@@ -30,28 +30,49 @@ export function resolveRestartTarget(options: {
   env: Record<string, string | undefined>;
   readFile: (path: string) => string;
   exists: (path: string) => boolean;
+  findEnv?: (key: string) => string | undefined;
+  requestedSessionName?: string;
+  requestedCharacterName?: string;
 }): RestartTargetResult {
-  const { env, readFile, exists } = options;
+  const {
+    env,
+    readFile,
+    exists,
+    findEnv,
+    requestedCharacterName,
+    requestedSessionName,
+  } = options;
   const launchScriptPath = resolveLaunchScriptPath(env);
 
-  let sessionName = env.DISCORD_MCP_RESTART_SESSION?.trim();
-  if (!sessionName && env.TMUX_SESSION_FILE && exists(env.TMUX_SESSION_FILE)) {
-    sessionName = readFile(env.TMUX_SESSION_FILE).trim();
+  let sessionName =
+    requestedSessionName?.trim() ?? env.DISCORD_MCP_RESTART_SESSION?.trim();
+  const characterName = requestedCharacterName?.trim();
+  if (!sessionName && characterName) {
+    sessionName = `codex-${characterName}`;
+  }
+
+  const sessionFile = env.TMUX_SESSION_FILE ?? findEnv?.("TMUX_SESSION_FILE");
+  if (!sessionName && sessionFile && exists(sessionFile)) {
+    sessionName = readFile(sessionFile).trim();
   }
 
   if (!sessionName) {
     return {
       error:
-        "現在の bot セッションを特定できません。TMUX_SESSION_FILE または DISCORD_MCP_RESTART_SESSION を設定してください。",
+        "現在の bot セッションを特定できません。sessionName / characterName / TMUX_SESSION_FILE / DISCORD_MCP_RESTART_SESSION のいずれかを設定してください。",
     };
   }
 
-  const characterName = sessionNameToCharacterName(sessionName);
-  if (!characterName) {
+  const resolvedCharacterName = sessionNameToCharacterName(sessionName);
+  if (!resolvedCharacterName) {
     return {
       error: `セッション名 "${sessionName}" から bot 名を特定できません。codex-<name> または claude-<name> 形式が必要です。`,
     };
   }
 
-  return { sessionName, characterName, launchScriptPath };
+  return {
+    sessionName,
+    characterName: resolvedCharacterName,
+    launchScriptPath,
+  };
 }

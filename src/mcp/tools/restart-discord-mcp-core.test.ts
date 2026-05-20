@@ -71,6 +71,52 @@ describe("resolveRestartTarget", () => {
     });
   });
 
+  test("ancestor env の TMUX_SESSION_FILE から現在セッションを解決する", () => {
+    const target = resolveRestartTarget({
+      env: {},
+      findEnv: (key) =>
+        key === "TMUX_SESSION_FILE" ? "/tmp/session-file" : undefined,
+      readFile: () => "codex-clamane\n",
+      exists: () => true,
+    });
+
+    expect(target).toEqual({
+      sessionName: "codex-clamane",
+      characterName: "clamane",
+      launchScriptPath: "/home/herring/agent-workspace/launch.sh",
+    });
+  });
+
+  test("明示 sessionName があれば優先する", () => {
+    const target = resolveRestartTarget({
+      env: {},
+      requestedSessionName: "codex-clamane",
+      readFile: () => "",
+      exists: () => false,
+    });
+
+    expect(target).toEqual({
+      sessionName: "codex-clamane",
+      characterName: "clamane",
+      launchScriptPath: "/home/herring/agent-workspace/launch.sh",
+    });
+  });
+
+  test("明示 characterName から codex session を組み立てる", () => {
+    const target = resolveRestartTarget({
+      env: {},
+      requestedCharacterName: "clamane",
+      readFile: () => "",
+      exists: () => false,
+    });
+
+    expect(target).toEqual({
+      sessionName: "codex-clamane",
+      characterName: "clamane",
+      launchScriptPath: "/home/herring/agent-workspace/launch.sh",
+    });
+  });
+
   test("セッションが解決できなければ error", () => {
     const target = resolveRestartTarget({
       env: {},
@@ -80,7 +126,7 @@ describe("resolveRestartTarget", () => {
 
     expect(target).toEqual({
       error:
-        "現在の bot セッションを特定できません。TMUX_SESSION_FILE または DISCORD_MCP_RESTART_SESSION を設定してください。",
+        "現在の bot セッションを特定できません。sessionName / characterName / TMUX_SESSION_FILE / DISCORD_MCP_RESTART_SESSION のいずれかを設定してください。",
     });
   });
 });

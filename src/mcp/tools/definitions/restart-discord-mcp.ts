@@ -12,6 +12,42 @@ import { validateOptionalString } from "../validators.js";
 
 const logger = getLogger("mcp");
 
+const findEnvInAncestors = (key: string): string | undefined => {
+  let currentPid = process.pid;
+
+  for (let i = 0; i < 5; i++) {
+    try {
+      if (currentPid === process.pid && process.env[key]) {
+        return process.env[key];
+      }
+
+      const environ = readFileSync(`/proc/${currentPid}/environ`, "utf-8");
+      const match = environ
+        .split("\0")
+        .find((line) => line.startsWith(`${key}=`));
+      if (match) {
+        return match.slice(key.length + 1);
+      }
+
+      const stat = readFileSync(`/proc/${currentPid}/stat`, "utf-8");
+      const lastParenIndex = stat.lastIndexOf(")");
+      const parts = stat
+        .substring(lastParenIndex + 1)
+        .trim()
+        .split(" ");
+      const ppidStr = parts[1];
+      if (!ppidStr) break;
+      const ppid = Number.parseInt(ppidStr, 10);
+      if (ppid === 0) break;
+      currentPid = ppid;
+    } catch {
+      break;
+    }
+  }
+
+  return undefined;
+};
+
 defineTool(
   {
     name: "restart_discord_mcp",
@@ -24,15 +60,33 @@ defineTool(
           type: "string",
           description: "再起動理由（任意、戻り値とログに記録されます）",
         },
+        sessionName: {
+          type: "string",
+          description:
+            "再起動対象の tmux セッション名（例: codex-clamane）。自動解決できない場合に指定します。",
+        },
+        characterName: {
+          type: "string",
+          description:
+            "再起動対象の bot 名（例: clamane）。指定時は codex-<name> セッションとして扱います。",
+        },
       },
     },
   },
   async (_client: Client, args: Record<string, unknown>) => {
     const reason = validateOptionalString(args.reason, "reason");
+    const sessionName = validateOptionalString(args.sessionName, "sessionName");
+    const characterName = validateOptionalString(
+      args.characterName,
+      "characterName",
+    );
     const target = resolveRestartTarget({
       env: process.env,
       readFile: (path) => readFileSync(path, "utf-8"),
       exists: existsSync,
+      findEnv: findEnvInAncestors,
+      requestedCharacterName: characterName,
+      requestedSessionName: sessionName,
     });
 
     if ("error" in target) {
