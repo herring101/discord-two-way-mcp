@@ -43,6 +43,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     discordClient.discordClient,
     (args as Record<string, unknown>) || {},
     discordClient.isReady,
+    {
+      restartDiscord: (reason?: string) => discordClient.restart(reason),
+    },
   );
 });
 

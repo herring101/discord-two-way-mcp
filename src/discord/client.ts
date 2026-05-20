@@ -56,17 +56,7 @@ export class DiscordClient {
   private lastWorkCheckMs = Date.now();
 
   constructor() {
-    this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-      ],
-      // DM channel は通常 cache されないため、Partials.Channel がないと
-      // messageCreate イベントが発火しない (Partials.Message も DM の partial 受信に必要)
-      partials: [Partials.Channel, Partials.Message],
-    });
+    this.client = this.createClient();
 
     // tmuxセッションを検出
     this.tmuxSession = getTmuxSession();
@@ -77,6 +67,20 @@ export class DiscordClient {
     }
 
     this.setupEventHandlers();
+  }
+
+  private createClient(): Client {
+    return new Client({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages,
+      ],
+      // DM channel は通常 cache されないため、Partials.Channel がないと
+      // messageCreate イベントが発火しない (Partials.Message も DM の partial 受信に必要)
+      partials: [Partials.Channel, Partials.Message],
+    });
   }
 
   private setupEventHandlers(): void {
@@ -477,11 +481,22 @@ export class DiscordClient {
   }
 
   async disconnect(): Promise<void> {
+    this._isReady = false;
     if (this.controller) {
       this.controller.cleanup();
+      this.controller = null;
     }
+    lifecycleController = null;
     await disconnectDatabase();
     await this.client.destroy();
+  }
+
+  async restart(reason?: string): Promise<void> {
+    logger.info(`Restarting Discord client${reason ? `: ${reason}` : ""}`);
+    await this.disconnect();
+    this.client = this.createClient();
+    this.setupEventHandlers();
+    await this.connect();
   }
 
   get isReady(): boolean {

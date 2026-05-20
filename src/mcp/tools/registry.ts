@@ -35,12 +35,17 @@ export interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
 }
 
+export interface ToolExecutionContext {
+  restartDiscord?: (reason?: string) => Promise<void>;
+}
+
 /**
  * ツールハンドラの型
  */
 export type ToolHandler = (
   client: Client,
   args: Record<string, unknown>,
+  context: ToolExecutionContext,
 ) => Promise<ToolResult>;
 
 /**
@@ -90,6 +95,7 @@ class ToolRegistry {
     client: Client,
     args: Record<string, unknown>,
     isDiscordReady: boolean,
+    context: ToolExecutionContext = {},
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -103,7 +109,7 @@ class ToolRegistry {
       );
     }
 
-    return tool.handler(client, args);
+    return tool.handler(client, args, context);
   }
 
   /**

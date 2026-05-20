@@ -61,7 +61,7 @@ bunx prisma db push --schema="src/db/prisma/schema.prisma"
 
 AIアシスタントの設定ファイルにサーバーを追加します。エントリポイントは `src/index.ts` です。
 
-`restart_discord_mcp` tool を使うと、現在の bot セッションを外部 supervisor (`launch.sh restart <bot>`) 経由で再起動できます。tool の戻り値には `target`, `mode`, `session`, `character` が含まれるため、何を再起動するかが明示されます。
+通常の Discord MCP 利用は tmux の現在セッション名を参照します。`tcodex` などで tmux セッション内から起動すれば、追加の supervisor は不要です。
 
 ### Claude Code (`~/.config/claude/mcp.json`)
 
@@ -74,8 +74,7 @@ AIアシスタントの設定ファイルにサーバーを追加します。エ
       "env": {
         "DISCORD_BOT_TOKEN": "your_bot_token",
         "GEMINI_API_KEY": "your_gemini_api_key",
-        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>",
-        "DISCORD_MCP_RESTART_LAUNCH_SH": "/absolute/path/to/agent-workspace/launch.sh"
+        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>"
       }
     }
   }
@@ -96,15 +95,7 @@ args = ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"]
 DISCORD_BOT_TOKEN = "your_bot_token"
 GEMINI_API_KEY = "your_gemini_api_key"
 NOTIFY_TARGET_USER_ID = "<owner Discord user id>"
-DISCORD_MCP_RESTART_LAUNCH_SH = "/absolute/path/to/agent-workspace/launch.sh"
 ```
-
-### 再起動 tool
-
-| ツール名              | 説明                                                                                                                                                 |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `restart_discord_mcp` | 現在の bot セッションで使っている Discord MCP を反映・復旧するため、外部 supervisor (`launch.sh restart <bot>`) に現在の bot セッション再起動を依頼する。 |
-
 
 ## 利用方法
 
@@ -123,8 +114,10 @@ MCPサーバー経由でBotが起動すると、以下の機能が利用可能�
 | `get_channels_list` | チャンネル一覧を取得 |
 | `get_channel_messages` | 指定チャンネルのメッセージを取得（既読化） |
 | `get_unread_summary` | 未読メッセージのサマリーを取得 |
+| `restart_discord_mcp` | Discord 接続だけを soft restart |
+| `set_send_target` | 次の送信先・返信先を設定 |
 | `send_message` | メッセージを送信 |
-| `reply_to_message` | メッセージに返信 |
+| `clear_send_target` | 送信先設定を解除 |
 | `add_reaction` | リアクションを追加 |
 | `search_messages` | 保存済みメッセージを検索 |
 | `end_activity` | 監視モードを終了して待機状態に戻る |
