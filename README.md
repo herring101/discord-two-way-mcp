@@ -44,8 +44,9 @@ Discordメッセージをリアルタイムでターミナルに通知し、AI�
 4. **環境変数の設定**
    MCP設定ファイルに直接記述します。
    ```bash
-   DISCORD_BOT_TOKEN="your_discord_bot_token"  # 必須
-   GEMINI_API_KEY="your_gemini_api_key"        # オプション：添付ファイル解析に必要
+   DISCORD_BOT_TOKEN="your_discord_bot_token"        # 必須
+   GEMINI_API_KEY="your_gemini_api_key"              # オプション：添付ファイル解析に必要
+   DISCORD_MCP_TMUX_SESSION="your_tmux_session_name" # オプション：tmux通知に必要
    ```
 
 ## セットアップ
@@ -61,7 +62,9 @@ bunx prisma db push --schema="src/db/prisma/schema.prisma"
 
 AIアシスタントの設定ファイルにサーバーを追加します。エントリポイントは `src/index.ts` です。
 
-通常の Discord MCP 利用は tmux の現在セッション名を参照します。`tcodex` などで tmux セッション内から起動すれば、追加の supervisor は不要です。
+tmux通知を使う場合は、送信先 tmux session を `DISCORD_MCP_TMUX_SESSION` で明示してください。複数 bot / 複数 tmux session が同じユーザーで動く環境でも混線しないよう、Discord MCP は tmux session を自動推定しません。
+
+tmux通知が不要で、MCP tool から Discord を読み書きするだけなら `DISCORD_MCP_TMUX_SESSION` は省略できます。
 
 ### Claude Code (`~/.config/claude/mcp.json`)
 
@@ -74,7 +77,8 @@ AIアシスタントの設定ファイルにサーバーを追加します。エ
       "env": {
         "DISCORD_BOT_TOKEN": "your_bot_token",
         "GEMINI_API_KEY": "your_gemini_api_key",
-        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>"
+        "NOTIFY_TARGET_USER_ID": "<owner Discord user id>",
+        "DISCORD_MCP_TMUX_SESSION": "<target tmux session name>"
       }
     }
   }
@@ -95,6 +99,7 @@ args = ["run", "/absolute/path/to/discord-two-way-mcp/src/index.ts"]
 DISCORD_BOT_TOKEN = "your_bot_token"
 GEMINI_API_KEY = "your_gemini_api_key"
 NOTIFY_TARGET_USER_ID = "<owner Discord user id>"
+DISCORD_MCP_TMUX_SESSION = "<target tmux session name>"
 ```
 
 ## 利用方法
