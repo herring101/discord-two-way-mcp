@@ -4,6 +4,7 @@
  */
 
 import type { PrismaClient } from "../db/generated/prisma/client.js";
+import { filterIgnoredChannels } from "../shared/ignored-channels.js";
 import type { ChannelId, MessageId } from "./types.js";
 
 /**
@@ -81,6 +82,7 @@ export async function markAsRead(
  */
 export async function getUnreadSummary(
   prisma: PrismaClient,
+  options: { ignoredChannelIds?: ReadonlySet<string> } = {},
 ): Promise<UnreadSummary[]> {
   // チャネルごとに未読数をカウント
   const groups = await prisma.unreadMessage.groupBy({
@@ -97,11 +99,12 @@ export async function getUnreadSummary(
 
   // Prismaの型推論が効きにくい場合があるため any キャストで回避
   // biome-ignore lint/suspicious/noExplicitAny: Prisma groupBy output type inference
-  return groups.map((g: any) => ({
+  const summaries = groups.map((g: any) => ({
     channelId: g.channelId,
     guildId: g.guildId,
     unreadCount: g._count.messageId,
   }));
+  return filterIgnoredChannels(summaries, options.ignoredChannelIds);
 }
 
 /**

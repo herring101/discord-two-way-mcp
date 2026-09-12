@@ -13,6 +13,8 @@ import { getLogger } from "./shared/logger.js";
 
 const logger = getLogger("main");
 
+let shutdownPromise: Promise<void> | null = null;
+
 // Initialize Discord client
 const discordClient = new DiscordClient();
 
@@ -29,6 +31,32 @@ const server = new Server(
     instructions: MCP_SERVER_INSTRUCTIONS,
   },
 );
+
+async function shutdown(reason: string, exitCode = 0): Promise<void> {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  shutdownPromise = (async () => {
+    logger.info(`${reason}, shutting down...`);
+    try {
+      await discordClient.disconnect();
+    } catch (error) {
+      logger.error(
+        "Failed to disconnect Discord client during shutdown:",
+        error,
+      );
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  })();
+
+  return shutdownPromise;
+}
+
+server.onclose = () => {
+  void shutdown("MCP transport closed");
+};
 
 // Register tool list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -68,18 +96,20 @@ async function main() {
   }
 }
 
-// Handle graceful shutdown
-process.on("SIGINT", async () => {
-  logger.info("Shutting down...");
-  await discordClient.disconnect();
-  process.exit(0);
+// The SDK's stdio transport does not turn stdin EOF into an onclose callback.
+process.stdin.once("end", () => {
+  void shutdown("MCP stdin ended");
+});
+process.stdin.once("close", () => {
+  void shutdown("MCP stdin closed");
 });
 
-// Handle transport close
-process.on("SIGTERM", async () => {
-  logger.info("Received SIGTERM, shutting down...");
-  await discordClient.disconnect();
-  process.exit(0);
+// Handle graceful shutdown signals through the same idempotent path.
+process.on("SIGINT", () => {
+  void shutdown("Received SIGINT");
+});
+process.on("SIGTERM", () => {
+  void shutdown("Received SIGTERM");
 });
 
 // Safety net: remove PID file on exit (synchronous, runs even on unexpected exit)

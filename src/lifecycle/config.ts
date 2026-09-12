@@ -14,6 +14,9 @@ export interface LifecycleConfig {
 
   /** 5分集計の間隔（ミリ秒） */
   activityTickIntervalMs: number;
+
+  /** 未読・Activity 集計から除外するチャンネルID */
+  ignoredChannelIds?: ReadonlySet<string>;
 }
 
 /**

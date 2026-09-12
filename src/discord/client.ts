@@ -11,6 +11,7 @@ import {
   disconnectDatabase,
   getPrismaClient,
   initDatabase,
+  prepareProcessSlot,
   saveMessage,
   updateAttachmentParsedContent,
 } from "../db/client.js";
@@ -32,10 +33,16 @@ import {
 } from "../shared/format.js";
 import { getLogger } from "../shared/logger.js";
 import { getTmuxSession, sendToTmux } from "../shared/tmux.js";
+import {
+  filterIgnoredActivityChannels,
+  parseIgnoredChannelIds,
+} from "./activity-filter.js";
 import { importAllGuildsAsync } from "./import.js";
 import { handleButtonInteraction } from "./interaction-router.js";
 import { isMentionOrReplyToBot } from "./mention.js";
 import { handleSlashCommand, registerSlashCommands } from "./slash-commands.js";
+import { VoiceAutoJoinController } from "./voice-auto-join.js";
+import { parseVoiceAutoJoinConfig } from "./voice-auto-join-config.js";
 
 const logger = getLogger("discord");
 
@@ -47,13 +54,18 @@ export function getLifecycleController(): LifecycleController | null {
 }
 
 export class DiscordClient {
+  private readonly voiceAutoJoinConfig = parseVoiceAutoJoinConfig(process.env);
   private client: Client;
   private _isReady = false;
   private tmuxSession: string | null = null;
   private lastNotifiedDate: Date | null = null;
   private botUserId: string | null = null;
   private controller: LifecycleController | null = null;
+  private voiceAutoJoinController: VoiceAutoJoinController | null = null;
   private lastWorkCheckMs = Date.now();
+  private ignoredActivityChannelIds = parseIgnoredChannelIds(
+    process.env.DISCORD_MCP_IGNORE_CHANNELS,
+  );
 
   constructor() {
     this.client = this.createClient();
@@ -70,13 +82,18 @@ export class DiscordClient {
   }
 
   private createClient(): Client {
+    const intents = [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.DirectMessages,
+    ];
+    if (this.voiceAutoJoinConfig) {
+      intents.push(GatewayIntentBits.GuildVoiceStates);
+    }
+
     return new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-      ],
+      intents,
       // DM channel は通常 cache されないため、Partials.Channel がないと
       // messageCreate イベントが発火しない (Partials.Message も DM の partial 受信に必要)
       partials: [Partials.Channel, Partials.Message],
@@ -111,8 +128,20 @@ export class DiscordClient {
             );
             importAllGuildsAsync(this.client);
           }
+
+          if (this.voiceAutoJoinConfig) {
+            this.voiceAutoJoinController = new VoiceAutoJoinController(
+              this.client,
+              this.voiceAutoJoinConfig,
+            );
+            await this.voiceAutoJoinController.start();
+          }
         } catch (error) {
           logger.error("Failed to initialize database:", error);
+          this._isReady = false;
+          await this.client.destroy();
+          setImmediate(() => process.exit(1));
+          return;
         }
       }
 
@@ -168,7 +197,12 @@ export class DiscordClient {
         if (!tmuxSession) return;
         const duration = Math.round((windowEndMs - windowStartMs) / 1000 / 60);
 
-        if (summary.length === 0) {
+        const visibleSummary = filterIgnoredActivityChannels(
+          summary,
+          this.ignoredActivityChannelIds,
+        );
+
+        if (visibleSummary.length === 0) {
           const now = Date.now();
           const interval =
             this.controller?.getConfig().promotionMeanIntervalMs ??
@@ -183,10 +217,13 @@ export class DiscordClient {
           return;
         }
 
-        const totalUnread = summary.reduce((acc, s) => acc + s.unreadCount, 0);
+        const totalUnread = visibleSummary.reduce(
+          (acc, s) => acc + s.unreadCount,
+          0,
+        );
 
         // 各チャンネルの件数をフォーマット
-        const details = summary
+        const details = visibleSummary
           .map((s) => {
             const channel = this.client.channels.cache.get(s.channelId);
             let channelName = `ch:${s.channelId}`;
@@ -215,7 +252,10 @@ export class DiscordClient {
       },
     };
 
-    this.controller = new LifecycleController(prisma, handler, defaultConfig);
+    this.controller = new LifecycleController(prisma, handler, {
+      ...defaultConfig,
+      ignoredChannelIds: this.ignoredActivityChannelIds,
+    });
     lifecycleController = this.controller;
 
     // 初期化（起動時刻で状態を決定）
@@ -476,12 +516,23 @@ export class DiscordClient {
     if (!token) {
       throw new Error("DISCORD_BOT_TOKEN environment variable is required");
     }
+    const configuredBotId = process.env.DISCORD_MCP_BOT_ID?.trim();
+    if (configuredBotId) {
+      logger.info(
+        `Checking Discord MCP process slot for configured bot ID ${configuredBotId} before login`,
+      );
+      prepareProcessSlot(configuredBotId);
+    }
     logger.info("Connecting to Discord...");
     await this.client.login(token);
   }
 
   async disconnect(): Promise<void> {
     this._isReady = false;
+    if (this.voiceAutoJoinController) {
+      await this.voiceAutoJoinController.stop();
+      this.voiceAutoJoinController = null;
+    }
     if (this.controller) {
       this.controller.cleanup();
       this.controller = null;

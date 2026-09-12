@@ -12,7 +12,10 @@ export type TraceEventName =
   | "set_send_target"
   | "clear_send_target"
   | "send_message"
-  | "upload_file";
+  | "upload_file"
+  | "create_forum_post"
+  | "create_channel"
+  | "edit_channel";
 
 export interface TraceAuditEvent {
   event: TraceEventName;
@@ -20,8 +23,14 @@ export interface TraceAuditEvent {
   channelId?: string;
   replyToMessageId?: string | null;
   messageId?: string;
+  threadId?: string;
   fileName?: string;
   fileSize?: number;
+  title?: string;
+  guildId?: string;
+  channelName?: string;
+  channelType?: string;
+  parentId?: string | null;
   contentPreview?: string;
   success: boolean;
   error?: string | null;

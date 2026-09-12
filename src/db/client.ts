@@ -20,6 +20,8 @@ let currentBotId: string | null = null;
 const DATA_DIR = join(import.meta.dirname, "../../data/db");
 const SCHEMA_PATH = join(import.meta.dirname, "./prisma/schema.prisma");
 
+class DuplicateProcessError extends Error {}
+
 /**
  * PIDファイルのパスを取得
  */
@@ -44,11 +46,37 @@ function waitForProcessExit(pid: number, timeoutMs: number): boolean {
   return false;
 }
 
+function getDuplicateProcessPolicy(): "kill" | "fail" {
+  const policy = process.env.DISCORD_MCP_DUPLICATE_POLICY?.trim().toLowerCase();
+  if (policy === "kill" || policy === "fail") {
+    return policy;
+  }
+  if (policy) {
+    logger.warn(
+      `Unknown DISCORD_MCP_DUPLICATE_POLICY="${policy}", using "kill"`,
+    );
+  }
+  return "kill";
+}
+
+function describeProcess(pid: number): string {
+  try {
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8")
+      .replaceAll("\0", " ")
+      .trim();
+    const status = readFileSync(`/proc/${pid}/status`, "utf-8");
+    const ppid = status.match(/^PPid:\s+(\d+)/m)?.[1] ?? "unknown";
+    return `pid=${pid} ppid=${ppid} cmd="${cmdline || "unknown"}"`;
+  } catch {
+    return `pid=${pid} ppid=unknown cmd=unknown`;
+  }
+}
+
 /**
- * 古いプロセスが動いていたら kill する
- * PIDファイルを読み取り、該当プロセスがまだ生きていれば SIGTERM → SIGKILL で終了させる
+ * 同じBot IDの既存プロセスを処理する
+ * PIDファイルを読み取り、該当プロセスがまだ生きていれば policy に従う
  */
-function killOldProcess(botId: string): void {
+export function prepareProcessSlot(botId: string): void {
   const pidFile = getPidFilePath(botId);
   if (!existsSync(pidFile)) {
     return;
@@ -84,6 +112,17 @@ function killOldProcess(botId: string): void {
     }
 
     // プロセスがまだ生きている → SIGTERM で終了を試みる
+    if (getDuplicateProcessPolicy() === "fail") {
+      const oldProcess = describeProcess(oldPid);
+      const currentProcess = describeProcess(process.pid);
+      logger.error(
+        `Discord MCP for bot ${botId} is already running (${oldProcess}); refusing duplicate startup from ${currentProcess}`,
+      );
+      throw new DuplicateProcessError(
+        `Discord MCP for bot ${botId} is already running as PID ${oldPid}`,
+      );
+    }
+
     logger.info(`Killing old process ${oldPid} for bot ${botId}...`);
     try {
       process.kill(oldPid, "SIGTERM");
@@ -113,6 +152,9 @@ function killOldProcess(botId: string): void {
 
     logger.info(`Old process ${oldPid} for bot ${botId} has been terminated`);
   } catch (error) {
+    if (error instanceof DuplicateProcessError) {
+      throw error;
+    }
     logger.warn(`Error handling old PID file for bot ${botId}:`, error);
   }
 
@@ -196,8 +238,8 @@ export async function initDatabase(botId: string): Promise<InitDatabaseResult> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  // 古いプロセスが存在すれば kill する（SQLite ロック競合を防止）
-  killOldProcess(botId);
+  // 古いプロセスが存在すれば policy に従って処理する（SQLite ロック競合を防止）
+  prepareProcessSlot(botId);
 
   // 現在のプロセスの PID を書き込む
   writePidFile(botId);

@@ -8,6 +8,7 @@ import {
   formatUnreadSummary,
   getUnreadSummary,
 } from "../../../lifecycle/unread.js";
+import { parseIgnoredChannelIds } from "../../../shared/ignored-channels.js";
 import { defineTool, textResult } from "../registry.js";
 
 defineTool(
@@ -22,7 +23,11 @@ defineTool(
   },
   async (_client: Client, _args: Record<string, unknown>) => {
     const prisma = getPrismaClient();
-    const summaries = await getUnreadSummary(prisma);
+    const summaries = await getUnreadSummary(prisma, {
+      ignoredChannelIds: parseIgnoredChannelIds(
+        process.env.DISCORD_MCP_IGNORE_CHANNELS,
+      ),
+    });
     const summary = formatUnreadSummary(summaries);
     return textResult(summary ?? "未読メッセージはありません。");
   },
