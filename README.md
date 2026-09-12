@@ -15,6 +15,7 @@ Discordメッセージをリアルタイムでターミナルに通知し、AI�
   - メッセージ通知のスマートフィルタリング
 - **永続化**: SQLite + Prismaによるメッセージ履歴の保存と全文検索
 - **Tmux連携**: 受信メッセージをtmuxのステータスラインやペインに通知
+- **音声記録**: 指定ユーザーの入室を検知して音声チャンネルへ参加し、対象ユーザーごとのWAVを保存（オプション）
 
 ## 必要要件
 
@@ -48,6 +49,20 @@ Discordメッセージをリアルタイムでターミナルに通知し、AI�
    GEMINI_API_KEY="your_gemini_api_key"              # オプション：添付ファイル解析に必要
    DISCORD_MCP_TMUX_SESSION="your_tmux_session_name" # オプション：tmux通知に必要
    ```
+
+### オプション設定
+
+- `DISCORD_MCP_BOT_ID`: ログイン前に同一Botの重複起動を検知するためのBot ID
+- `DISCORD_MCP_DUPLICATE_POLICY`: 重複起動時の動作。`kill`（既定）または `fail`
+- `DISCORD_MCP_IGNORE_CHANNELS`: 未読・Activity集計から除外するチャンネルID。カンマ区切りまたはJSON配列
+- `DISCORD_VOICE_AUTOJOIN_CHANNEL_ID`: 音声自動参加の対象チャンネルID
+- `DISCORD_VOICE_AUTOJOIN_USER_IDS`: 参加トリガーにするユーザーID（カンマ区切り）
+- `DISCORD_VOICE_RECORDING_DIR`: WAV録音とセッション情報の保存先
+- `DISCORD_VOICE_RECORD_USER_IDS`: 録音対象ユーザーID（省略時は参加トリガーと同じ）
+- `DISCORD_VOICE_LEAVE_DELAY_MS`: トリガーユーザー退出後にBotが退出するまでの待機時間（既定30秒）
+- `DISCORD_VOICE_REQUIRE_RECORDING_NOTICE`: 録音開始通知に失敗した場合、録音を開始しないか（既定`true`）
+
+音声自動参加を使う場合は、対象Botで `GuildVoiceStates` intentを利用でき、対象チャンネルの閲覧・接続・メッセージ送信権限があることを確認してください。音声設定は `DISCORD_VOICE_AUTOJOIN_CHANNEL_ID`、`DISCORD_VOICE_AUTOJOIN_USER_IDS`、`DISCORD_VOICE_RECORDING_DIR` の3項目を揃えた場合だけ有効になります。
 
 ## セットアップ
 
@@ -124,6 +139,9 @@ MCPサーバー経由でBotが起動すると、以下の機能が利用可能�
 | `send_message` | メッセージを送信 |
 | `clear_send_target` | 送信先設定を解除 |
 | `add_reaction` | リアクションを追加 |
+| `create_forum_post` | フォーラムチャンネルに新規投稿を作成 |
+| `create_channel` | カテゴリ・テキスト・フォーラムチャンネルを作成 |
+| `edit_channel` | チャンネル名・親カテゴリ・トピックを変更 |
 | `search_messages` | 保存済みメッセージを検索 |
 | `end_activity` | 監視モードを終了して待機状態に戻る |
 | `import_guild_messages` | 過去のメッセージをDBにインポート |

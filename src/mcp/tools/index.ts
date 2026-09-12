@@ -4,6 +4,7 @@
 import "./definitions/add-reaction.js";
 import "./definitions/clear-send-target.js";
 import "./definitions/create-reminder.js";
+import "./definitions/create-forum-post.js";
 import "./definitions/delete-reminder.js";
 import "./definitions/end-activity.js";
 import "./definitions/get-channel-messages.js";
@@ -11,6 +12,7 @@ import "./definitions/get-channels-list.js";
 import "./definitions/get-unread-summary.js";
 import "./definitions/import-guild-messages.js";
 import "./definitions/list-reminders.js";
+import "./definitions/manage-channels.js";
 import "./definitions/manage-trust.js";
 import "./definitions/notify-owner.js";
 import "./definitions/restart-discord-mcp.js";

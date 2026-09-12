@@ -16,6 +16,7 @@ interface ActiveTarget extends SendTarget {
 }
 
 let activeTarget: ActiveTarget | null = null;
+let targetVersion = 0;
 
 async function fireTyping(client: Client, channelId: string): Promise<void> {
   try {
@@ -34,9 +35,15 @@ export async function setSendTarget(
   client: Client,
   target: SendTarget,
 ): Promise<void> {
-  clearSendTarget();
+  const version = ++targetVersion;
+  clearActiveTarget();
 
   await fireTyping(client, target.channelId);
+
+  // A newer set/clear call may have completed while sendTyping was in flight.
+  if (version !== targetVersion) {
+    return;
+  }
 
   const refreshTimer = setInterval(() => {
     void fireTyping(client, target.channelId);
@@ -56,6 +63,11 @@ export function getSendTarget(): SendTarget | null {
 }
 
 export function clearSendTarget(): void {
+  targetVersion += 1;
+  clearActiveTarget();
+}
+
+function clearActiveTarget(): void {
   if (!activeTarget) {
     return;
   }

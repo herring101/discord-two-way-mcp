@@ -289,7 +289,7 @@ export class LifecycleController {
         `[Lifecycle] ${time} AWAKE_WATCHING に遷移しました。(focus: ${chId})`,
       );
 
-      const summaries = await getUnreadSummary(this.prisma);
+      const summaries = await this.getVisibleUnreadSummary();
       const summary = formatUnreadSummary(summaries);
       if (summary) {
         this.handler.sendToAgent(summary);
@@ -560,6 +560,7 @@ export class LifecycleController {
         sleepEndTime: saved.sleepEndTime,
         promotionMeanIntervalMs: saved.promotionMeanIntervalMs,
         activityTickIntervalMs: saved.activityTickIntervalMs,
+        ignoredChannelIds: this.config.ignoredChannelIds,
       };
       logger.info(
         `[Lifecycle] Config loaded from DB: sleep=${saved.sleepStartTime}-${saved.sleepEndTime}`,
@@ -619,7 +620,7 @@ export class LifecycleController {
     }
 
     // 未読サマリーを取得してfocusChannelを決定
-    const summaries = await getUnreadSummary(this.prisma);
+    const summaries = await this.getVisibleUnreadSummary();
     const firstSummary = summaries[0];
     const focusChannelId = firstSummary
       ? toChannelId(firstSummary.channelId)
@@ -657,7 +658,7 @@ export class LifecycleController {
     const nowMs = Date.now();
 
     // 全未読を取得し、UnreadSummaryWithDetails に変換
-    const rawSummary = await getUnreadSummary(this.prisma);
+    const rawSummary = await this.getVisibleUnreadSummary();
     const summary: UnreadSummaryWithDetails[] = rawSummary.map((s) => ({
       channelId: s.channelId,
       guildId: s.guildId,
@@ -674,5 +675,11 @@ export class LifecycleController {
 
     // 次のウィンドウ開始
     this.activityWindowStartMs = nowMs;
+  }
+
+  private async getVisibleUnreadSummary() {
+    return getUnreadSummary(this.prisma, {
+      ignoredChannelIds: this.config.ignoredChannelIds,
+    });
   }
 }
